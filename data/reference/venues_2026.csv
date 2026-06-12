@@ -1,0 +1,17 @@
+city,stadium,country,lat,lon,altitude_m,roof,climate_controlled,surface,tz
+Mexico City,Estadio Azteca,Mexico,19.3029,-99.1505,2240,open,false,natural_grass,America/Mexico_City
+Zapopan,Estadio Akron,Mexico,20.6817,-103.4625,1566,open,false,natural_grass,America/Mexico_City
+Guadalupe,Estadio BBVA,Mexico,25.6692,-100.2447,540,open,false,natural_grass,America/Monterrey
+Toronto,BMO Field,Canada,43.6332,-79.4186,83,open,false,hybrid_grass,America/Toronto
+Vancouver,BC Place,Canada,49.2767,-123.1119,9,retractable,false,temp_grass_over_turf,America/Vancouver
+East Rutherford,MetLife Stadium,United States,40.8135,-74.0745,3,open,false,temp_grass_over_turf,America/New_York
+Foxborough,Gillette Stadium,United States,42.0909,-71.2643,89,open,false,temp_grass_over_turf,America/New_York
+Philadelphia,Lincoln Financial Field,United States,39.9008,-75.1675,12,open,false,hybrid_grass,America/New_York
+Atlanta,Mercedes-Benz Stadium,United States,33.7554,-84.4010,303,retractable,true,temp_grass_over_turf,America/New_York
+Miami Gardens,Hard Rock Stadium,United States,25.9580,-80.2389,3,open,false,natural_grass,America/New_York
+Houston,NRG Stadium,United States,29.6847,-95.4107,15,retractable,true,temp_grass_over_turf,America/Chicago
+Arlington,AT&T Stadium,United States,32.7473,-97.0945,168,retractable,true,temp_grass_over_turf,America/Chicago
+Kansas City,Arrowhead Stadium,United States,39.0489,-94.4839,266,open,false,natural_grass,America/Chicago
+Seattle,Lumen Field,United States,47.5952,-122.3316,5,open,false,temp_grass_over_turf,America/Los_Angeles
+Santa Clara,Levi's Stadium,United States,37.4033,-121.9694,8,open,false,natural_grass,America/Los_Angeles
+Inglewood,SoFi Stadium,United States,33.9535,-118.3392,35,fixed_canopy,false,temp_grass_over_turf,America/Los_Angeles
