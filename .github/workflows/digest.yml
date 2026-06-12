@@ -1,0 +1,32 @@
+name: morning-digest
+
+on:
+  schedule:
+    # 12:45 UTC ≈ 6:45am America/Guatemala; Actions cron can lag a few
+    # minutes at busy times, so this lands the digest around 7:00
+    - cron: "45 12 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install
+        run: pip install -e .
+
+      - name: Build and send digest
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          DIGEST_DAYS: "2"
+          DIGEST_SIMS: "30000"
+        run: python scripts/cloud_digest.py

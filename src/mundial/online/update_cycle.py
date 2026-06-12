@@ -163,7 +163,11 @@ def predict_upcoming(
         "bayes": DynamicHierarchicalPoisson().fit(train, as_of=as_of),
         "gbm": GbmModel().fit(train, as_of=as_of, fixtures=fixtures),
     }
-    odds = fetch_odds()
+    try:
+        odds = fetch_odds()
+    except Exception as e:  # odds are an enhancement, never a dependency
+        print(f"odds fetch failed, continuing without market layer: {e}")
+        odds = None
     market = {}
     if odds is not None:
         market = {
