@@ -9,3 +9,5 @@ data/interim/
 data/features/
 reports/*.html
 .DS_Store
+.env
+logs/

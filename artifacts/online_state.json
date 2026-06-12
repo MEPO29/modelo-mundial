@@ -1,0 +1,11 @@
+{
+  "weights": {
+    "dc": 0.05,
+    "bayes": 0.55,
+    "gbm": 0.05,
+    "market": 0.35
+  },
+  "scored": [],
+  "score_history": [],
+  "cusum": 0.0
+}

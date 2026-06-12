@@ -18,6 +18,7 @@ make data       # pull latest international results (includes WC 2026 fixtures)
 make backtest   # walk-forward eval of all layers + ensemble on 5 past tournaments
 make predict    # fit on everything played and predict upcoming WC matches
 make simulate   # 100k Monte Carlo runs of the full 2026 bracket
+make update     # full online cycle: pull, Hedge-score, refit, odds, log, simulate, report
 make test       # pytest
 ```
 
@@ -26,5 +27,12 @@ make test       # pytest
 - `src/mundial/ingest/` — data acquisition (immutable raw pulls under `data/raw/`)
 - `src/mundial/models/` — `baseline.py` (Dixon-Coles), then Bayesian backbone, GBM, ensemble
 - `src/mundial/eval/` — metrics (RPS/log-loss/Brier/ECE) and walk-forward backtests
-- `data/reference/venues_2026.csv` — hand-curated 16-venue table (altitude, roof, surface, tz)
+- `src/mundial/online/` — the post-match update cycle (scheduled daily at 8:30 via cron)
+- `data/reference/` — venues, official groups, bracket topology, altitude table
+- `artifacts/` — pool weights, online state, the append-only prediction log
 - `docs/ARCHITECTURE.md` — the full system blueprint and sprint roadmap
+
+Odds come from The Odds API; the key lives in `.env` (`ODDS_API_KEY=...`, not
+committed). Forecasts are frozen when logged and scored only against later
+results — the Hedge weight updates and the model-vs-market scoreboard in each
+cycle report are honest by construction.

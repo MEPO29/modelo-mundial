@@ -12,13 +12,38 @@ optional and the ensemble degrades gracefully without it.
 from __future__ import annotations
 
 import datetime as dt
+import json
 import os
+from pathlib import Path
 
 import numpy as np
 import polars as pl
 import requests
 
 ODDS_API_URL = "https://api.the-odds-api.com/v4/sports/soccer_fifa_world_cup/odds"
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+RAW_ODDS_DIR = PROJECT_ROOT / "data" / "raw" / "odds"
+
+# The Odds API team names -> martj42 dataset names
+TEAM_ALIASES = {
+    "USA": "United States",
+    "Bosnia & Herzegovina": "Bosnia and Herzegovina",
+    "South Korea": "South Korea",
+    "Republic of Korea": "South Korea",
+    "Korea Republic": "South Korea",
+    "Czechia": "Czech Republic",
+    "Türkiye": "Turkey",
+    "Curacao": "Curaçao",
+    "Cote d'Ivoire": "Ivory Coast",
+    "IR Iran": "Iran",
+    "Congo DR": "DR Congo",
+    "Democratic Republic of the Congo": "DR Congo",
+}
+
+
+def normalize_team(name: str) -> str:
+    return TEAM_ALIASES.get(name, name)
 
 
 def shin_devig(odds: np.ndarray) -> np.ndarray:
@@ -61,8 +86,13 @@ def fetch_odds(api_key: str | None = None) -> pl.DataFrame | None:
         timeout=30,
     )
     resp.raise_for_status()
+    payload = resp.json()
+    RAW_ODDS_DIR.mkdir(parents=True, exist_ok=True)
+    stamp = dt.datetime.now().strftime("%Y-%m-%dT%H%M%S")
+    (RAW_ODDS_DIR / f"{stamp}.json").write_text(json.dumps(payload))
+
     rows = []
-    for event in resp.json():
+    for event in payload:
         home, away = event["home_team"], event["away_team"]
         per_book = []
         for book in event.get("bookmakers", []):
@@ -78,7 +108,7 @@ def fetch_odds(api_key: str | None = None) -> pl.DataFrame | None:
         p = shin_devig(med)
         rows.append(
             {
-                "home_team": home, "away_team": away,
+                "home_team": normalize_team(home), "away_team": normalize_team(away),
                 "odds_h": med[0], "odds_d": med[1], "odds_a": med[2],
                 "p_h": p[0], "p_d": p[1], "p_a": p[2],
                 "fetched": dt.datetime.now().isoformat(timespec="seconds"),

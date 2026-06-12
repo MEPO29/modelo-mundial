@@ -72,6 +72,43 @@ def loto_eval(df: pl.DataFrame, components: list[str], y_col: str = "outcome") -
     return out
 
 
+HEDGE_ETA = 0.2
+WEIGHT_FLOOR = 0.01
+LOSS_CLIP = 4.0  # cap a single match's -log p at ~p=1.8%
+
+
+def hedge_update(
+    weights: np.ndarray, losses: np.ndarray, eta: float = HEDGE_ETA
+) -> np.ndarray:
+    """Multiplicative-weights update on per-component log-losses.
+
+    Total mass is preserved (it acts as the pool temperature) and every
+    component keeps a floor weight so it can re-earn trust later.
+    """
+    w = np.asarray(weights, dtype=float)
+    total = w.sum()
+    w = w * np.exp(-eta * np.clip(losses, 0.0, LOSS_CLIP))
+    w = w * total / w.sum()
+    # exact floor: redistribute only the mass above the floor
+    w = np.maximum(w, WEIGHT_FLOOR)
+    above = w - WEIGHT_FLOOR
+    return WEIGHT_FLOOR + above * (total - WEIGHT_FLOOR * len(w)) / above.sum()
+
+
+def pool_predict_partial(
+    weights: np.ndarray, prob_blocks: list[np.ndarray | None]
+) -> np.ndarray:
+    """Pool when some components have no prediction (None blocks).
+
+    Available components' weights are rescaled to the full total so the
+    pool temperature stays comparable across matches.
+    """
+    avail = [i for i, b in enumerate(prob_blocks) if b is not None]
+    w = np.asarray(weights, dtype=float)
+    w_avail = w[avail] * w.sum() / w[avail].sum()
+    return pool_predict(w_avail, [prob_blocks[i] for i in avail])
+
+
 def save_weights(weights: np.ndarray, components: list[str]) -> Path:
     ARTIFACTS.mkdir(exist_ok=True)
     path = ARTIFACTS / "pool_weights.json"
