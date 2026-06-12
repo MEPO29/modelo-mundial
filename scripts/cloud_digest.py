@@ -68,7 +68,8 @@ def build_digest() -> str:
             )
             lines.append(
                 f"{r['home_team']} v {r['away_team']}\n"
-                f"  {r['pool_h']:.0%} / {r['pool_d']:.0%} / {r['pool_a']:.0%}{mk}"
+                f"  {r['pool_h']:.0%} / {r['pool_d']:.0%} / {r['pool_a']:.0%}{mk}\n"
+                f"  ⚽ {r['score_pred']} ({r['score_prob']:.0%}) · xG {r['xg_h']:.1f}–{r['xg_a']:.1f}"
             )
 
     # yesterday's results

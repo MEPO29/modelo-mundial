@@ -184,7 +184,19 @@ def predict_upcoming(
             market[(h, a)][None, :] if (h, a) in market else None,
         ]
         pool = ens.pool_predict_partial(weights, blocks)[0]
-        row = {"date": str(r["date"]), "home_team": h, "away_team": a, "neutral": neu}
+
+        # scoreline distribution from the Bayesian layer (the only component
+        # with a goal grid); expected goals from the grid mean, mode as the
+        # headline "predicted score"
+        grid = models["bayes"].score_matrix(h, a, neutral=neu)
+        g = np.arange(grid.shape[0])
+        xg_h = float((grid.sum(axis=1) * g).sum())
+        xg_a = float((grid.sum(axis=0) * g).sum())
+        mh, ma = np.unravel_index(grid.argmax(), grid.shape)
+
+        row = {"date": str(r["date"]), "home_team": h, "away_team": a, "neutral": neu,
+               "score_pred": f"{mh}-{ma}", "score_prob": float(grid[mh, ma]),
+               "xg_h": xg_h, "xg_a": xg_a}
         for c, b in zip(COMPONENTS, blocks):
             for j, suf in enumerate(["h", "d", "a"]):
                 row[f"{c}_{suf}"] = float(b[0, j]) if b is not None else None
@@ -259,8 +271,8 @@ def write_report(today, scored, state, preds, sim_table, cusum) -> Path:
         ]
     if preds.height:
         lines += ["## Upcoming matches (pool forecast)", "",
-                  "| date | match | P(H) | P(D) | P(A) | market P(H/D/A) |",
-                  "|---|---|---|---|---|---|"]
+                  "| date | match | P(H) | P(D) | P(A) | likely score | xG | market P(H/D/A) |",
+                  "|---|---|---|---|---|---|---|---|"]
         for r in preds.iter_rows(named=True):
             mk = (
                 f"{r['market_h']:.0%}/{r['market_d']:.0%}/{r['market_a']:.0%}"
@@ -268,7 +280,9 @@ def write_report(today, scored, state, preds, sim_table, cusum) -> Path:
             )
             lines.append(
                 f"| {r['date']} | {r['home_team']} v {r['away_team']} | "
-                f"{r['pool_h']:.1%} | {r['pool_d']:.1%} | {r['pool_a']:.1%} | {mk} |"
+                f"{r['pool_h']:.1%} | {r['pool_d']:.1%} | {r['pool_a']:.1%} | "
+                f"{r['score_pred']} ({r['score_prob']:.0%}) | "
+                f"{r['xg_h']:.1f}–{r['xg_a']:.1f} | {mk} |"
             )
         lines.append("")
     if sim_table is not None:
