@@ -15,8 +15,9 @@ python3 -m venv .venv
 
 ```bash
 make data       # pull latest international results (includes WC 2026 fixtures)
-make backtest   # walk-forward baseline eval on WC 2014/2018/2022, Euro 2024, Copa 2024
+make backtest   # walk-forward eval of all layers + ensemble on 5 past tournaments
 make predict    # fit on everything played and predict upcoming WC matches
+make simulate   # 100k Monte Carlo runs of the full 2026 bracket
 make test       # pytest
 ```
 

@@ -1,6 +1,9 @@
 PY := .venv/bin/python
 
-.PHONY: data backtest predict test
+.PHONY: data backtest predict simulate test
+
+simulate:
+	$(PY) -m mundial.models.simulate
 
 data:
 	$(PY) -m mundial.ingest.results

@@ -1,0 +1,32 @@
+{
+  "_source": "en.wikipedia.org/wiki/2026_FIFA_World_Cup_knockout_stage (fetched 2026-06-11). Slot syntax: '1A' = winner of group A, '2A' = runner-up, '3:ABCDF' = a best third from one of those groups (exact allocation per FIFA Annex C; the simulator uses a valid bipartite matching).",
+  "round_of_32": {
+    "73": {"home": "2A", "away": "2B", "city": "Inglewood"},
+    "74": {"home": "1E", "away": "3:ABCDF", "city": "Foxborough"},
+    "75": {"home": "1F", "away": "2C", "city": "Guadalupe"},
+    "76": {"home": "1C", "away": "2F", "city": "Houston"},
+    "77": {"home": "1I", "away": "3:CDFGH", "city": "East Rutherford"},
+    "78": {"home": "2E", "away": "2I", "city": "Arlington"},
+    "79": {"home": "1A", "away": "3:CEFHI", "city": "Mexico City"},
+    "80": {"home": "1L", "away": "3:EHIJK", "city": "Atlanta"},
+    "81": {"home": "1D", "away": "3:BEFIJ", "city": "Santa Clara"},
+    "82": {"home": "1G", "away": "3:AEHIJ", "city": "Seattle"},
+    "83": {"home": "2K", "away": "2L", "city": "Toronto"},
+    "84": {"home": "1H", "away": "2J", "city": "Inglewood"},
+    "85": {"home": "1B", "away": "3:EFGIJ", "city": "Vancouver"},
+    "86": {"home": "1J", "away": "2H", "city": "Miami Gardens"},
+    "87": {"home": "1K", "away": "3:DEIJL", "city": "Kansas City"},
+    "88": {"home": "2D", "away": "2G", "city": "Arlington"}
+  },
+  "round_of_16": {
+    "89": ["74", "77"], "90": ["73", "75"], "91": ["76", "78"], "92": ["79", "80"],
+    "93": ["83", "84"], "94": ["81", "82"], "95": ["86", "88"], "96": ["85", "87"]
+  },
+  "quarterfinals": {
+    "97": ["89", "90"], "98": ["93", "94"], "99": ["91", "92"], "100": ["95", "96"]
+  },
+  "semifinals": {
+    "101": ["97", "98"], "102": ["99", "100"]
+  },
+  "final": {"104": ["101", "102"]}
+}
