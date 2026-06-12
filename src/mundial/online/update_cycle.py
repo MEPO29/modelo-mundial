@@ -147,11 +147,11 @@ def update_cusum(state: dict) -> float:
 
 
 def predict_upcoming(
-    results: pl.DataFrame, today: dt.date
+    results: pl.DataFrame, today: dt.date, horizon_days: int = HORIZON_DAYS
 ) -> tuple[pl.DataFrame, DynamicHierarchicalPoisson | None]:
     """Component + pooled predictions for WC fixtures in the horizon window."""
     fixtures = load_fixtures(tournament="FIFA World Cup").filter(
-        (pl.col("date") >= today) & (pl.col("date") <= today + dt.timedelta(days=HORIZON_DAYS))
+        (pl.col("date") >= today) & (pl.col("date") <= today + dt.timedelta(days=horizon_days))
     )
     if fixtures.height == 0:
         return pl.DataFrame(), None
@@ -284,6 +284,26 @@ def write_report(today, scored, state, preds, sim_table, cusum) -> Path:
     return path
 
 
+def push_artifacts() -> None:
+    """Best-effort: sync Hedge state and reports to the remote so cloud
+    digest runs pool with current weights. Never fails the cycle."""
+    import subprocess
+
+    try:
+        subprocess.run(["git", "add", "artifacts", "reports"], cwd=PROJECT_ROOT,
+                       check=True, capture_output=True)
+        r = subprocess.run(
+            ["git", "commit", "-m", f"cycle: online state {dt.date.today()}"],
+            cwd=PROJECT_ROOT, capture_output=True,
+        )
+        if r.returncode == 0:
+            subprocess.run(["git", "push"], cwd=PROJECT_ROOT, check=True,
+                           capture_output=True, timeout=120)
+            print("artifacts pushed to remote")
+    except Exception as e:  # no remote, offline, etc.
+        print(f"artifact push skipped: {e}")
+
+
 def main() -> None:
     load_env()
     today = dt.date.today()
@@ -312,6 +332,7 @@ def main() -> None:
     save_state(state)
     path = write_report(today, scored, state, preds, sim_table, cusum)
     print(f"report: {path}")
+    push_artifacts()
 
 
 if __name__ == "__main__":
