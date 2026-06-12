@@ -1,4 +1,7 @@
-"""Fit the baseline on everything played so far and predict upcoming WC fixtures."""
+"""Fit a model on everything played so far and predict upcoming WC fixtures.
+
+Usage: predict_next.py [days_ahead] [baseline|bayes]
+"""
 
 from __future__ import annotations
 
@@ -9,19 +12,21 @@ import polars as pl
 
 from mundial.ingest.results import load_fixtures, load_results
 from mundial.models.baseline import DixonColes
+from mundial.models.bayes import DynamicHierarchicalPoisson
+
+MODELS = {"baseline": DixonColes, "bayes": DynamicHierarchicalPoisson}
 
 
-def main(days_ahead: int = 4) -> None:
+def main(days_ahead: int = 4, model_name: str = "bayes") -> None:
     today = dt.date.today()
     results = load_results().filter(pl.col("date") >= dt.date(1990, 1, 1))
-    model = DixonColes().fit(results, as_of=today + dt.timedelta(days=1))
+    model = MODELS[model_name]().fit(results, as_of=today + dt.timedelta(days=1))
 
     fixtures = load_fixtures(tournament="FIFA World Cup").filter(
         (pl.col("date") >= today) & (pl.col("date") <= today + dt.timedelta(days=days_ahead))
     )
 
-    print(f"Dixon-Coles baseline | fit through {today} | home_adv={model.home_adv:.3f} "
-          f"rho={model.rho:.3f}\n")
+    print(f"model={model_name} | fit through {today} | rho={model.rho:.3f}\n")
     print(f"{'date':<11} {'home':<22} {'away':<22} {'P(H)':>6} {'P(D)':>6} {'P(A)':>6}")
     for date, home, away, neu in fixtures.select(
         "date", "home_team", "away_team", "neutral"
@@ -31,4 +36,7 @@ def main(days_ahead: int = 4) -> None:
 
 
 if __name__ == "__main__":
-    main(int(sys.argv[1]) if len(sys.argv) > 1 else 4)
+    main(
+        int(sys.argv[1]) if len(sys.argv) > 1 else 4,
+        sys.argv[2] if len(sys.argv) > 2 else "bayes",
+    )
