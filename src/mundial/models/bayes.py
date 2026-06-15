@@ -82,7 +82,7 @@ class DynamicHierarchicalPoisson:
     _samples: dict = field(default_factory=dict)
     _last_period: int = 0
 
-    def fit(self, matches: pl.DataFrame, as_of: dt.date) -> "DynamicHierarchicalPoisson":
+    def fit(self, matches: pl.DataFrame, as_of: dt.date) -> DynamicHierarchicalPoisson:
         df = matches.filter((pl.col("date") >= self.since) & (pl.col("date") < as_of))
         self._conf_of = team_confederations(matches.filter(pl.col("date") < as_of))
 
@@ -156,6 +156,30 @@ class DynamicHierarchicalPoisson:
             return s["atk"][:, i, self._last_period], s["dfn"][:, i, self._last_period]
         c = CONFEDERATIONS.index(self._conf_of.get(team, "OTHER"))
         return s["mu_conf_atk"][:, c], s["mu_conf_dfn"][:, c]
+
+    def _period_of(self, date: dt.date) -> int:
+        """Random-walk period index for a date, clamped to the fitted range."""
+        p = (date - self.since).days // PERIOD_DAYS
+        return max(0, min(int(p), self._last_period))
+
+    def strength_means(
+        self, team: str, date: dt.date | None = None
+    ) -> tuple[float, float]:
+        """Posterior-MEAN (attack, defense) for a team at ``date``'s period.
+
+        The time-appropriate strength used to stack the backbone into the GBM:
+        a row dated in period p gets the strength at period p (not the latest),
+        so a historical training row never carries a later era's strength.
+        Unseen teams fall back to their confederation mean; ``date=None`` (or a
+        future date) yields the latest period — the value ``predict_1x2`` uses.
+        """
+        s = self._samples
+        if team in self._index:
+            i = self._index[team]
+            p = self._last_period if date is None else self._period_of(date)
+            return float(s["atk"][:, i, p].mean()), float(s["dfn"][:, i, p].mean())
+        c = CONFEDERATIONS.index(self._conf_of.get(team, "OTHER"))
+        return float(s["mu_conf_atk"][:, c].mean()), float(s["mu_conf_dfn"][:, c].mean())
 
     def score_matrix(self, home: str, away: str, neutral: bool = True) -> np.ndarray:
         """Posterior-predictive P(h, a) grid, averaged over strength samples."""

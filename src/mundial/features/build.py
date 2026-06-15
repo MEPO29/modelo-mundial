@@ -44,6 +44,9 @@ FEATURE_COLS = [
     "h2h_gd", "h2h_n",
     "home_flag", "altitude_m",
     "ttype", "conf_h", "conf_a",
+    # Layer A (Bayesian backbone) posterior-mean strengths; 0.0 when no
+    # backbone is supplied (the GBM then simply ignores constant columns).
+    "bayes_atk_h", "bayes_dfn_h", "bayes_atk_a", "bayes_dfn_a", "bayes_str_diff",
 ]
 CATEGORICAL_COLS = ["ttype", "conf_h", "conf_a"]
 
@@ -78,11 +81,12 @@ class _TeamState:
 class Featurizer:
     """One pass over matches sorted by date; call features() then update()."""
 
-    def __init__(self, conf_of: dict[str, str]) -> None:
+    def __init__(self, conf_of: dict[str, str], bayes_strength=None) -> None:
         self.conf_of = conf_of
         self.alt = _altitudes()
         self.state: dict[str, _TeamState] = {}
         self.h2h: dict[tuple[str, str], list[int]] = {}
+        self.bayes_strength = bayes_strength
 
     def _st(self, team: str) -> _TeamState:
         if team not in self.state:
@@ -115,6 +119,14 @@ class Featurizer:
         gd10a, _, _ = form(sa, 10)
         past = self.h2h.get((home, away), [])
 
+        if self.bayes_strength is not None:
+            batk_h, bdfn_h = self.bayes_strength(home, date)
+            batk_a, bdfn_a = self.bayes_strength(away, date)
+        else:
+            batk_h = bdfn_h = batk_a = bdfn_a = 0.0
+        # net matchup edge in log-rate space: (attack vs their defense) both ways
+        bstr_diff = (batk_h - bdfn_a) - (batk_a - bdfn_h)
+
         return {
             "elo_h": sh.elo,
             "elo_a": sa.elo,
@@ -139,6 +151,9 @@ class Featurizer:
             "ttype": _tournament_type(tournament),
             "conf_h": CONFEDERATIONS.index(self.conf_of.get(home, "OTHER")),
             "conf_a": CONFEDERATIONS.index(self.conf_of.get(away, "OTHER")),
+            "bayes_atk_h": batk_h, "bayes_dfn_h": bdfn_h,
+            "bayes_atk_a": batk_a, "bayes_dfn_a": bdfn_a,
+            "bayes_str_diff": bstr_diff,
         }
 
     def update(self, date: dt.date, home: str, away: str, hg: int, ag: int,
@@ -159,14 +174,17 @@ class Featurizer:
 
 
 def build_features(
-    played: pl.DataFrame, fixtures: pl.DataFrame | None = None
+    played: pl.DataFrame, fixtures: pl.DataFrame | None = None, bayes_strength=None
 ) -> tuple[pl.DataFrame, pl.DataFrame | None]:
     """Feature matrices for played matches and (optionally) upcoming fixtures.
 
     `played` must be sorted by date and contain only rows with scores.
+    `bayes_strength`, when given, is a ``(team, date) -> (atk_mean, dfn_mean)``
+    callable (see ``DynamicHierarchicalPoisson.strength_means``) used to attach
+    the Layer A posterior-mean strengths as features.
     """
     conf_of = team_confederations(played)
-    fz = Featurizer(conf_of)
+    fz = Featurizer(conf_of, bayes_strength=bayes_strength)
 
     rows = []
     for r in played.iter_rows(named=True):

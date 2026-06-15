@@ -42,14 +42,19 @@ class GbmModel:
     _fixture_probs: dict[tuple, np.ndarray] = field(default_factory=dict)
 
     def fit(self, matches: pl.DataFrame, as_of: dt.date,
-            fixtures: pl.DataFrame | None = None) -> "GbmModel":
+            fixtures: pl.DataFrame | None = None, backbone=None) -> GbmModel:
         """Fit on played matches before `as_of`; pre-compute fixture predictions.
 
         The featurizer streams the full history once, so fixture features see
         exactly the state as of the last played match — no leakage.
+
+        `backbone`, when supplied, is a fitted ``DynamicHierarchicalPoisson``
+        whose posterior-mean strengths are stacked in as features (Layer A ->
+        Layer B). It must be fit on the same pre-`as_of` cut to avoid leakage.
         """
         played = matches.filter(pl.col("date") < as_of).sort("date")
-        train, fix = build_features(played, fixtures)
+        strength = backbone.strength_means if backbone is not None else None
+        train, fix = build_features(played, fixtures, bayes_strength=strength)
         train = train.filter(pl.col("date") >= TRAIN_SINCE)
 
         X = train.select(FEATURE_COLS).to_pandas()

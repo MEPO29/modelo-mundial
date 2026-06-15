@@ -41,7 +41,12 @@ def build_digest() -> str:
 
     from mundial.ingest.results import download_results, load_results
     from mundial.models.simulate import TournamentSimulator
-    from mundial.online.update_cycle import load_env, predict_upcoming
+    from mundial.online.update_cycle import (
+        freshness_warning,
+        load_env,
+        load_state,
+        predict_upcoming,
+    )
 
     load_env()
     today = dt.date.today()
@@ -51,6 +56,10 @@ def build_digest() -> str:
     preds, bayes_model = predict_upcoming(results, today, horizon_days=DAYS)
 
     lines = [f"🏆 <b>WC2026 — {today.strftime('%a %b %d')}</b>"]
+
+    warn = freshness_warning(results, load_state(), today)
+    if warn:
+        lines.append(f"\n⚠️ <b>{warn}</b>")
 
     if preds.height == 0:
         lines.append("\nNo matches in the next "

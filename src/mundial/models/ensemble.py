@@ -116,11 +116,12 @@ def save_weights(weights: np.ndarray, components: list[str]) -> Path:
         json.dumps(
             {"components": components, "weights": np.asarray(weights).tolist()},
             indent=2,
-        )
+        ),
+        encoding="utf-8",
     )
     return path
 
 
 def load_weights() -> tuple[np.ndarray, list[str]]:
-    blob = json.loads((ARTIFACTS / "pool_weights.json").read_text())
+    blob = json.loads((ARTIFACTS / "pool_weights.json").read_text(encoding="utf-8"))
     return np.array(blob["weights"]), blob["components"]
