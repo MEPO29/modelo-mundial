@@ -1,16 +1,28 @@
 name: morning-digest
 
 on:
+  # Backup trigger. GitHub's scheduler can lag and — worse — auto-disables
+  # scheduled workflows after 60 days of repo inactivity. The reliable path
+  # is an external cron (cron-job.org) hitting the workflow_dispatch API
+  # below; this schedule is just a safety net.
   schedule:
-    # 12:45 UTC ≈ 6:45am America/Guatemala; Actions cron can lag a few
-    # minutes at busy times, so this lands the digest around 7:00
-    - cron: "45 12 * * *"
+    - cron: "45 12 * * *"   # ~6:45am America/Guatemala
   workflow_dispatch: {}
+
+# Don't let a slow run overlap the next trigger; never cancel a run that is
+# mid-way through persisting learning state.
+concurrency:
+  group: morning-digest
+  cancel-in-progress: false
+
+# The persist step pushes updated state to the model-state branch.
+permissions:
+  contents: write
 
 jobs:
   digest:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
 
@@ -21,6 +33,54 @@ jobs:
 
       - name: Install
         run: pip install -e .
+
+      - name: Restore learning state from model-state branch
+        run: |
+          if git fetch origin model-state 2>/dev/null; then
+            git checkout FETCH_HEAD -- artifacts reports || true
+            echo "restored prior learning state from model-state"
+          else
+            echo "no model-state branch yet; seeding from state committed on the working branch"
+          fi
+
+      - name: Online learning cycle (refit on fresh results, adapt weights, persist locally)
+        # A hiccup here must never block the digest send or the state persist.
+        continue-on-error: true
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          CYCLE_PUSH: "0"   # the persist step below owns the git push
+        run: python -m mundial.online.update_cycle
+
+      - name: Persist learning state to model-state branch
+        # Persist regardless of whether the digest later succeeds.
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          url="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          tmp="$(mktemp -d)"
+          if git ls-remote --exit-code --heads "$url" model-state >/dev/null 2>&1; then
+            git clone --depth 1 --branch model-state "$url" "$tmp"
+          else
+            git clone --depth 1 "$url" "$tmp"
+            git -C "$tmp" checkout --orphan model-state
+            git -C "$tmp" rm -rf . >/dev/null 2>&1 || true
+          fi
+          rm -rf "$tmp/artifacts" "$tmp/reports"
+          cp -r artifacts "$tmp/artifacts" 2>/dev/null || true
+          cp -r reports  "$tmp/reports"  2>/dev/null || true
+          git -C "$tmp" add -A
+          if git -C "$tmp" diff --cached --quiet; then
+            echo "no state changes to persist"
+          else
+            git -C "$tmp" \
+              -c user.name="wc2026-bot" \
+              -c user.email="github-actions[bot]@users.noreply.github.com" \
+              commit -m "cycle: online state $(date -u +%F)"
+            git -C "$tmp" push origin model-state
+            echo "persisted learning state to model-state"
+          fi
 
       - name: Build and send digest
         env:

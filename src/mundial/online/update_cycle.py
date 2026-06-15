@@ -304,8 +304,17 @@ def write_report(today, scored, state, preds, sim_table, cusum) -> Path:
 
 def push_artifacts() -> None:
     """Best-effort: sync Hedge state and reports to the remote so cloud
-    digest runs pool with current weights. Never fails the cycle."""
+    digest runs pool with current weights. Never fails the cycle.
+
+    Set CYCLE_PUSH=0 to skip the git push entirely — used in CI, where a
+    dedicated workflow step persists state to the `model-state` branch
+    instead of committing to the working branch."""
+    import os
     import subprocess
+
+    if os.environ.get("CYCLE_PUSH", "1") == "0":
+        print("artifact push skipped (CYCLE_PUSH=0)")
+        return
 
     try:
         subprocess.run(["git", "add", "artifacts", "reports"], cwd=PROJECT_ROOT,
