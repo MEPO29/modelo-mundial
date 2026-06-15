@@ -52,9 +52,17 @@ def _seed_state():
 
 
 def test_scores_each_match_once_and_moves_weights(paths):
-    log = pl.DataFrame([_log_row("2026-06-13", "Brazil", "Serbia",
-                                 (0.6, 0.25, 0.15), (0.58, 0.26, 0.16))])
-    log.write_parquet(uc.LOG_PATH)
+    # distinct component calls so the Hedge update actually shifts weight:
+    # bayes is confidently right, gbm confidently wrong, on a home win.
+    row = {"date": "2026-06-13", "home_team": "Brazil", "away_team": "Serbia"}
+    comp_probs = {
+        "dc": (0.5, 0.25, 0.25), "bayes": (0.8, 0.1, 0.1),
+        "gbm": (0.1, 0.2, 0.7), "market": (0.5, 0.25, 0.25),
+    }
+    for c, (ph, pd_, pa) in comp_probs.items():
+        row[f"{c}_h"], row[f"{c}_d"], row[f"{c}_a"] = ph, pd_, pa
+    row["pool_h"], row["pool_d"], row["pool_a"] = 0.6, 0.2, 0.2
+    pl.DataFrame([row]).write_parquet(uc.LOG_PATH)
     results = _results([(dt.date(2026, 6, 13), "Brazil", "Serbia", 2, 0)])
 
     state = _seed_state()
@@ -62,8 +70,9 @@ def test_scores_each_match_once_and_moves_weights(paths):
     assert len(scored) == 1
     assert len(state["score_history"]) == 1
     assert "2026-06-13|Brazil|Serbia" in state["scored"]
-    # a home win (outcome 0) must move weight onto the components that called it
-    assert state["weights"] != dict(uc.INITIAL_WEIGHTS)
+    # home win: the confident-correct component gains share, the wrong one loses
+    assert state["weights"]["bayes"] > uc.INITIAL_WEIGHTS["bayes"]
+    assert state["weights"]["gbm"] < uc.INITIAL_WEIGHTS["gbm"]
 
     # idempotent: re-running scores nothing new
     again = uc.score_new_results(state, results)
