@@ -41,9 +41,13 @@ STATE_PATH = ARTIFACTS / "online_state.json"
 LOG_PATH = ARTIFACTS / "predictions_log.parquet"
 
 COMPONENTS = ["dc", "bayes", "gbm", "market"]
-# bayes carries the LOTO-fitted mass; market gets the literature prior;
-# dc/gbm keep live slots and must earn weight through the Hedge updates.
-INITIAL_WEIGHTS = {"dc": 0.05, "bayes": 0.55, "gbm": 0.05, "market": 0.35}
+# Leave-one-tournament-out on WC 14/18/22 closing odds (eval/backtest market
+# analysis) puts the bayes:market split near 0.31:0.69 and improves held-out
+# RPS. The prior reflects that market-led evidence but shrinks off the 0.69
+# point estimate — only 3 folds, and the live feed (The Odds API median) is
+# noisier than the backtested closing line. dc/gbm keep live slots and must
+# earn weight through the Hedge updates.
+INITIAL_WEIGHTS = {"dc": 0.05, "bayes": 0.35, "gbm": 0.05, "market": 0.55}
 HORIZON_DAYS = 5
 CUSUM_THRESHOLD = 3.0
 N_SIMS = 100_000

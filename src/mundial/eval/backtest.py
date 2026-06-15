@@ -119,20 +119,35 @@ def market_analysis(preds: pl.DataFrame) -> None:
             print(f"{tname:<11} {comp:<9} {len(yt):>3}  {m['rps']:>6.4f}  "
                   f"{m['log_loss']:>7.4f}  {m['ece']:>5.3f}")
 
+    comps4 = [*COMPONENTS, "market"]
     blocks3 = [sub.select(f"{c}_h", f"{c}_d", f"{c}_a").to_numpy() for c in COMPONENTS]
     blocks4 = blocks3 + [sub.select("market_h", "market_d", "market_a").to_numpy()]
-    w3 = ens.fit_pool_weights(blocks3, y)
-    w4 = ens.fit_pool_weights(blocks4, y)
-    rps3 = rps(ens.pool_predict(w3, blocks3), y)
-    rps4 = rps(ens.pool_predict(w4, blocks4), y)
-    comps4 = [*COMPONENTS, "market"]
-    wn = w4 / w4.sum()
-    print(f"\npool on market subset (n={sub.height}):")
-    print(f"  3-comp (dc,bayes,gbm)      RPS {rps3:.4f}")
-    print(f"  4-comp (+market)           RPS {rps4:.4f}  "
-          f"({'better' if rps4 < rps3 else 'no improvement'})")
-    print(f"  fitted weights {dict(zip(comps4, wn.round(3)))}")
-    print(f"  -> evidence-based market share {wn[-1]:.2f} (live prior is 0.35)")
+
+    # in-sample (optimistic — fit and scored on the same rows)
+    w4_in = ens.fit_pool_weights(blocks4, y)
+    w4_in /= w4_in.sum()
+
+    # out-of-sample: leave-one-tournament-out over the WC tournaments with odds.
+    # This is the honest test the live 0.35 prior never had — fit on two
+    # tournaments, score the held-out one, and average the market share.
+    rps3_loto = rps(ens.loto_eval(sub, COMPONENTS), y)
+    rps4_loto = rps(ens.loto_eval(sub, comps4), y)
+    tournaments = sub["tournament_name"].to_numpy()
+    fold_weights = []
+    for t in np.unique(tournaments):
+        held = tournaments == t
+        wt = ens.fit_pool_weights([b[~held] for b in blocks4], y[~held])
+        fold_weights.append(wt / wt.sum())
+    w4_oos = np.mean(fold_weights, axis=0)
+
+    print(f"\nmarket-inclusive pool on the odds subset (n={sub.height}):")
+    print(f"  LOTO RPS  3-comp (dc,bayes,gbm) {rps3_loto:.4f}"
+          f"   4-comp (+market) {rps4_loto:.4f}  "
+          f"({'better' if rps4_loto < rps3_loto else 'no improvement'})")
+    print(f"  in-sample weights  {dict(zip(comps4, w4_in.round(3)))}")
+    print(f"  LOTO mean weights  {dict(zip(comps4, w4_oos.round(3)))}")
+    print(f"  -> out-of-sample market share {w4_oos[-1]:.2f} "
+          f"(in-sample {w4_in[-1]:.2f}; live prior 0.35)")
 
 
 def main() -> None:
