@@ -39,8 +39,8 @@ ROUNDS = ["r32", "r16", "qf", "sf", "final", "champion"]
 
 
 def load_reference() -> tuple[dict, dict, dict]:
-    groups = json.loads((REFERENCE / "groups_2026.json").read_text())
-    bracket = json.loads((REFERENCE / "bracket_2026.json").read_text())
+    groups = json.loads((REFERENCE / "groups_2026.json").read_text(encoding="utf-8"))
+    bracket = json.loads((REFERENCE / "bracket_2026.json").read_text(encoding="utf-8"))
     venues = pl.read_csv(REFERENCE / "venues_2026.csv")
     city_country = dict(venues.select("city", "country").iter_rows())
     return groups, bracket, city_country

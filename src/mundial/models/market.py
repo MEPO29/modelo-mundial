@@ -25,7 +25,7 @@ ODDS_API_URL = "https://api.the-odds-api.com/v4/sports/soccer_fifa_world_cup/odd
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 RAW_ODDS_DIR = PROJECT_ROOT / "data" / "raw" / "odds"
 
-# The Odds API team names -> martj42 dataset names
+# The Odds API / football-data.co.uk team names -> martj42 dataset names
 TEAM_ALIASES = {
     "USA": "United States",
     "Bosnia & Herzegovina": "Bosnia and Herzegovina",
@@ -39,6 +39,9 @@ TEAM_ALIASES = {
     "IR Iran": "Iran",
     "Congo DR": "DR Congo",
     "Democratic Republic of the Congo": "DR Congo",
+    # football-data.co.uk spellings (others reconciled via unmatched_teams())
+    "D.R. Congo": "DR Congo",
+    "Trinidad & Tobago": "Trinidad and Tobago",
 }
 
 
@@ -89,7 +92,7 @@ def fetch_odds(api_key: str | None = None) -> pl.DataFrame | None:
     payload = resp.json()
     RAW_ODDS_DIR.mkdir(parents=True, exist_ok=True)
     stamp = dt.datetime.now().strftime("%Y-%m-%dT%H%M%S")
-    (RAW_ODDS_DIR / f"{stamp}.json").write_text(json.dumps(payload))
+    (RAW_ODDS_DIR / f"{stamp}.json").write_text(json.dumps(payload), encoding="utf-8")
 
     rows = []
     for event in payload:

@@ -38,7 +38,7 @@ class DixonColes:
 
     POOLED = "__other__"
 
-    def fit(self, matches: pl.DataFrame, as_of: dt.date) -> "DixonColes":
+    def fit(self, matches: pl.DataFrame, as_of: dt.date) -> DixonColes:
         """matches: columns date, home_team, away_team, home_score, away_score, neutral."""
         df = matches.filter(pl.col("date") < as_of)
 

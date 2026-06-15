@@ -11,3 +11,4 @@ reports/*.html
 .DS_Store
 .env
 logs/
+.coverage

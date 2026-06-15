@@ -63,6 +63,7 @@ Run via the Makefile (`PY := .venv/bin/python`):
 ```bash
 make data       # pull latest international results + WC 2026 fixtures
 make backtest   # walk-forward eval of all layers + ensemble on 5 past tournaments
+                # (also validates the market layer on WC 14/18/22 closing odds)
 make predict    # fit on everything played, predict upcoming WC matches
 make simulate   # 100k Monte Carlo runs of the full 48-team 2026 bracket
 make update     # full online cycle (see below)
@@ -74,6 +75,19 @@ Run a single test file directly:
 ```bash
 .venv/bin/pytest tests/test_baseline.py -q
 ```
+
+### Development
+
+```bash
+make lint        # ruff check (F/I/UP/B)
+make format      # ruff format
+make typecheck   # mypy (advisory)
+make cov         # pytest with coverage report
+```
+
+CI (`.github/workflows/ci.yml`) runs lint + the test suite on every push and
+pull request; mypy runs as a non-blocking step. Pre-commit hooks
+(`.pre-commit-config.yaml`) apply ruff lint+format on commit.
 
 ---
 
@@ -140,6 +154,12 @@ Body: {"ref":"main"}
 A `204` response means it fired. To test the whole chain manually:
 **Actions → morning-digest → Run workflow**, or `gh workflow run digest.yml`.
 
+**Confirm it actually ran:** check that the **`model-state`** branch has a fresh
+`cycle: online state <today>` commit. If that branch is missing or stale while
+matches are being played, the loop has stalled — the cycle report and the
+Telegram digest now print a ⚠️ freshness warning in that case (played matches
+that were pre-logged but never scored, or results older than ~2 days).
+
 Required GitHub repo **secrets**: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`,
 `ODDS_API_KEY`.
 
@@ -191,7 +211,11 @@ gitignored.
 - **Results & fixtures:** [`martj42/international_results`](https://github.com/martj42/international_results)
   — `load_results()` returns played matches, `load_fixtures()` returns upcoming
   rows (null scores).
-- **Odds:** [The Odds API](https://the-odds-api.com/) — Shin de-vigged in
+- **Live odds:** [The Odds API](https://the-odds-api.com/) — Shin de-vigged in
   `models/market.py`.
+- **Historical odds & xG:** `data/reference/WorldCup2026-football-data-co-uk.xlsx`
+  (football-data.co.uk) — closing bookmaker odds for WC 2014/2018/2022 and xG for
+  the 2026 qualifiers, parsed by `ingest/footy_odds.py`. This is what lets
+  `make backtest` score the **market layer** against real closing odds.
 - **Reference:** 48-team bracket topology, official group assignments, venue
   table, and altitude data in `data/reference/`.

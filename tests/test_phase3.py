@@ -1,5 +1,4 @@
 import datetime as dt
-import json
 from pathlib import Path
 
 import numpy as np
@@ -104,7 +103,11 @@ def test_fixture_features_continue_state(small_history):
 def test_groups_match_fixture_components():
     """The Wikipedia-sourced groups must equal the team sets that actually
     play each other in the dataset's 72 group fixtures."""
+    from mundial.ingest import results as results_mod
     from mundial.models.simulate import wc_matches
+
+    if not list(results_mod.RAW_DIR.glob("*/results.csv")):
+        pytest.skip("martj42 results not pulled")
 
     groups, _, _ = load_reference()
     played, fixtures = wc_matches()

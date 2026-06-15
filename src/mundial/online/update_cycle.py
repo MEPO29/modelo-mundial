@@ -26,7 +26,6 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 
-from mundial.eval.metrics import log_loss, rps
 from mundial.ingest.results import download_results, load_fixtures, load_results
 from mundial.models import ensemble as ens
 from mundial.models.baseline import DixonColes
@@ -55,7 +54,7 @@ def load_env() -> None:
     if env.exists():
         import os
 
-        for line in env.read_text().splitlines():
+        for line in env.read_text(encoding="utf-8").splitlines():
             if "=" in line and not line.startswith("#"):
                 k, v = line.split("=", 1)
                 os.environ.setdefault(k.strip(), v.strip())
@@ -63,7 +62,7 @@ def load_env() -> None:
 
 def load_state() -> dict:
     if STATE_PATH.exists():
-        return json.loads(STATE_PATH.read_text())
+        return json.loads(STATE_PATH.read_text(encoding="utf-8"))
     return {
         "weights": dict(INITIAL_WEIGHTS),
         "scored": [],
@@ -74,7 +73,7 @@ def load_state() -> dict:
 
 def save_state(state: dict) -> None:
     ARTIFACTS.mkdir(exist_ok=True)
-    STATE_PATH.write_text(json.dumps(state, indent=2))
+    STATE_PATH.write_text(json.dumps(state, indent=2), encoding="utf-8")
 
 
 def match_key(date, home, away) -> str:
@@ -134,6 +133,50 @@ def score_new_results(state: dict, results: pl.DataFrame) -> list[dict]:
     return scored_rows
 
 
+WC_START = dt.date(2026, 6, 11)
+STALE_DAYS = 2  # newest WC result older than this during the tournament = suspect
+
+
+def freshness_warning(results: pl.DataFrame, state: dict, today: dt.date) -> str | None:
+    """Warn when the loop looks stalled: played WC matches that were pre-logged
+    but never scored, or results that have gone stale mid-tournament.
+
+    Returns a human-readable warning string, or None when healthy. This turns
+    the silent failure mode (a cycle that runs but scores nothing) into a loud
+    signal in the cycle report and the morning digest.
+    """
+    wc = results.filter(
+        (pl.col("tournament") == "FIFA World Cup")
+        & (pl.col("date") >= WC_START)
+        & (pl.col("date") <= today)
+    )
+    if wc.height == 0:
+        return None  # tournament has no played matches yet — nothing to score
+
+    msgs = []
+    if LOG_PATH.exists():
+        log = pl.read_parquet(LOG_PATH)
+        played_keys = {
+            match_key(r["date"], r["home_team"], r["away_team"])
+            for r in wc.iter_rows(named=True)
+        }
+        logged_keys = {
+            match_key(r["date"], r["home_team"], r["away_team"])
+            for r in log.iter_rows(named=True)
+        }
+        unscored = (played_keys & logged_keys) - set(state.get("scored", []))
+        if unscored:
+            msgs.append(
+                f"{len(unscored)} played, pre-logged match(es) still unscored - "
+                "the loop may be stalled (check it is running daily)"
+            )
+
+    age = (today - wc["date"].max()).days
+    if age > STALE_DAYS:
+        msgs.append(f"newest WC result is {age}d old ({wc['date'].max()}) - results may be stale")
+    return "; ".join(msgs) or None
+
+
 def update_cusum(state: dict) -> float:
     """CUSUM of (pool log-loss - market log-loss); positive drift = model worse."""
     cusum = 0.0
@@ -158,10 +201,11 @@ def predict_upcoming(
 
     as_of = today + dt.timedelta(days=1)
     train = results.filter(pl.col("date") >= dt.date(1990, 1, 1))
+    bayes = DynamicHierarchicalPoisson().fit(train, as_of=as_of)
     models = {
         "dc": DixonColes().fit(train, as_of=as_of),
-        "bayes": DynamicHierarchicalPoisson().fit(train, as_of=as_of),
-        "gbm": GbmModel().fit(train, as_of=as_of, fixtures=fixtures),
+        "bayes": bayes,
+        "gbm": GbmModel().fit(train, as_of=as_of, fixtures=fixtures, backbone=bayes),
     }
     try:
         odds = fetch_odds()
@@ -244,11 +288,14 @@ def scoreboard(state: dict) -> dict:
     return {"n_scored": n, "pool_logloss": float(pool), **{f"{c}_logloss": v for c, v in comp_means.items()}}
 
 
-def write_report(today, scored, state, preds, sim_table, cusum) -> Path:
+def write_report(today, scored, state, preds, sim_table, cusum, warning=None) -> Path:
     REPORTS.mkdir(exist_ok=True)
     path = REPORTS / f"cycle_{today.isoformat()}.md"
     w = state["weights"]
     lines = [f"# Cycle report — {today}", ""]
+
+    if warning:
+        lines += [f"> ⚠️ **{warning}**", ""]
 
     if scored:
         lines += ["## Newly scored matches", ""]
@@ -298,7 +345,7 @@ def write_report(today, scored, state, preds, sim_table, cusum) -> Path:
                 f"| {r['p_final']:.1%} | {r['p_champion']:.1%} |"
             )
         lines.append("")
-    path.write_text("\n".join(lines))
+    path.write_text("\n".join(lines), encoding="utf-8")
     return path
 
 
@@ -346,6 +393,10 @@ def main() -> None:
     print(f"scored {len(scored)} new matches; weights "
           + " ".join(f"{c}={state['weights'][c]:.3f}" for c in COMPONENTS))
 
+    warning = freshness_warning(results, state, today)
+    if warning:
+        print(f"WARNING: {warning}")
+
     preds, bayes_model = predict_upcoming(results, today)
     append_log(preds)
     print(f"logged {preds.height} upcoming predictions")
@@ -357,7 +408,7 @@ def main() -> None:
         sim_table.write_csv(REPORTS / f"sim_{today.isoformat()}.csv")
 
     save_state(state)
-    path = write_report(today, scored, state, preds, sim_table, cusum)
+    path = write_report(today, scored, state, preds, sim_table, cusum, warning)
     print(f"report: {path}")
     push_artifacts()
 

@@ -17,6 +17,7 @@ import numpy as np
 import polars as pl
 
 from mundial.eval.metrics import brier, ece, log_loss, rps
+from mundial.ingest.footy_odds import oriented_market
 from mundial.ingest.results import load_results
 from mundial.models import ensemble as ens
 from mundial.models.baseline import DixonColes
@@ -32,6 +33,9 @@ TOURNAMENTS = {
 }
 
 COMPONENTS = ["dc", "bayes", "gbm"]
+
+# backtest tournaments for which the football-data workbook carries closing odds
+MARKET_YEARS = {"WC 2014": 2014, "WC 2018": 2018, "WC 2022": 2022}
 
 
 def outcome_labels(df: pl.DataFrame) -> np.ndarray:
@@ -57,21 +61,27 @@ def collect_predictions(results: pl.DataFrame) -> pl.DataFrame:
         test = tournament_matches(results, tourn, start, end)
         if test.height == 0:
             continue
+        bayes = DynamicHierarchicalPoisson().fit(results, as_of=start)
         models = {
             "dc": DixonColes().fit(results, as_of=start),
-            "bayes": DynamicHierarchicalPoisson().fit(results, as_of=start),
-            "gbm": GbmModel().fit(results, as_of=start, fixtures=test),
+            "bayes": bayes,
+            "gbm": GbmModel().fit(results, as_of=start, fixtures=test, backbone=bayes),
         }
         rows = test.select("date", "home_team", "away_team", "neutral").to_dicts()
         y = outcome_labels(test)
+        market = oriented_market(test, MARKET_YEARS[name]) if name in MARKET_YEARS else None
         for i, r in enumerate(rows):
             r["tournament_name"] = name
             r["outcome"] = int(y[i])
             for comp, model in models.items():
                 p = model.predict_1x2(r["home_team"], r["away_team"], neutral=r["neutral"])
                 r[f"{comp}_h"], r[f"{comp}_d"], r[f"{comp}_a"] = map(float, p)
+            if market is not None and not np.isnan(market[i]).any():
+                r["market_h"], r["market_d"], r["market_a"] = map(float, market[i])
+            else:
+                r["market_h"] = r["market_d"] = r["market_a"] = None
         frames.append(pl.DataFrame(rows))
-    return pl.concat(frames)
+    return pl.concat(frames, how="diagonal")
 
 
 def metric_row(probs: np.ndarray, y: np.ndarray) -> dict[str, float]:
@@ -81,6 +91,48 @@ def metric_row(probs: np.ndarray, y: np.ndarray) -> dict[str, float]:
         "brier": brier(probs, y),
         "ece": ece(probs, y),
     }
+
+
+def market_analysis(preds: pl.DataFrame) -> None:
+    """Validate the market layer on the tournaments that carry closing odds.
+
+    Reports the market's own RPS and whether adding it as a 4th component
+    improves the pool, on exactly the rows where real odds exist — the
+    evidence the live 0.35 market prior never had.
+    """
+    if "market_h" not in preds.columns:
+        return
+    sub = preds.filter(pl.col("market_h").is_not_null())
+    if sub.height == 0:
+        print("\nno market odds matched any backtest tournament")
+        return
+    y = sub["outcome"].to_numpy()
+    n_total = preds.filter(pl.col("tournament_name").is_in(list(MARKET_YEARS))).height
+    print(f"\nmarket layer — odds matched {sub.height}/{n_total} WC matches")
+    print(f"{'tournament':<11} {'model':<9} {'n':>3}  {'RPS':>6}  {'logloss':>7}  {'ECE':>5}")
+    for tname in sub["tournament_name"].unique(maintain_order=True):
+        t = sub.filter(pl.col("tournament_name") == tname)
+        yt = t["outcome"].to_numpy()
+        for comp in [*COMPONENTS, "market"]:
+            p = t.select(f"{comp}_h", f"{comp}_d", f"{comp}_a").to_numpy()
+            m = metric_row(p, yt)
+            print(f"{tname:<11} {comp:<9} {len(yt):>3}  {m['rps']:>6.4f}  "
+                  f"{m['log_loss']:>7.4f}  {m['ece']:>5.3f}")
+
+    blocks3 = [sub.select(f"{c}_h", f"{c}_d", f"{c}_a").to_numpy() for c in COMPONENTS]
+    blocks4 = blocks3 + [sub.select("market_h", "market_d", "market_a").to_numpy()]
+    w3 = ens.fit_pool_weights(blocks3, y)
+    w4 = ens.fit_pool_weights(blocks4, y)
+    rps3 = rps(ens.pool_predict(w3, blocks3), y)
+    rps4 = rps(ens.pool_predict(w4, blocks4), y)
+    comps4 = [*COMPONENTS, "market"]
+    wn = w4 / w4.sum()
+    print(f"\npool on market subset (n={sub.height}):")
+    print(f"  3-comp (dc,bayes,gbm)      RPS {rps3:.4f}")
+    print(f"  4-comp (+market)           RPS {rps4:.4f}  "
+          f"({'better' if rps4 < rps3 else 'no improvement'})")
+    print(f"  fitted weights {dict(zip(comps4, wn.round(3)))}")
+    print(f"  -> evidence-based market share {wn[-1]:.2f} (live prior is 0.35)")
 
 
 def main() -> None:
@@ -120,6 +172,8 @@ def main() -> None:
     weights = ens.fit_pool_weights(blocks, y_all)
     path = ens.save_weights(weights, COMPONENTS)
     print(f"\npool weights {dict(zip(COMPONENTS, weights.round(3)))} saved to {path}")
+
+    market_analysis(preds)
 
 
 if __name__ == "__main__":
