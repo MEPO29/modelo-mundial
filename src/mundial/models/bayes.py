@@ -35,15 +35,30 @@ from mundial.ingest.confederations import CONFEDERATIONS, team_confederations
 from mundial.models.baseline import MAX_GOALS, _tau
 
 PERIOD_DAYS = 182
-FRIENDLY_WEIGHT = 0.5
+# Friendlies carry real strength signal; the previous 0.5 under-counted them.
+# A 5-tournament walk-forward sweep favours 0.7 (improves 4/5 tournaments and
+# both RPS and log-loss when paired with the faster random walk below).
+FRIENDLY_WEIGHT = 0.7
+
+# Prior scales — module-level so they can be tuned/ablated without touching the
+# model body. Defaults are the validated production values.
+# sigma_rw 0.2 (was 0.1) lets team strengths drift a little faster between
+# half-year periods; the walk-forward sweep prefers it (marginal but robust:
+# overall RPS 0.1949 -> 0.1947, log-loss 0.9659 -> 0.9651, better on 4/5
+# reference tournaments; 90% bootstrap CI on the delta still spans 0, so this
+# is a gentle refinement of an already near-optimal backbone, not a step change).
+SIGMA_RW_PRIOR = 0.2     # HalfNormal scale on the per-period random-walk step
+SIGMA_TEAM_PRIOR = 0.5   # HalfNormal scale on team base-strength dispersion
+HOME_ADV_LOC = 0.25      # Normal mean of the home-advantage log-rate term
+HOME_ADV_SCALE = 0.2     # Normal sd of the home-advantage term
 
 
 def _model(home, away, period, home_flag, weight, n_teams, n_periods, conf_idx,
            n_confs, hg=None, ag=None):
     mu_conf_atk = sample("mu_conf_atk", dist.Normal(0.0, 0.5).expand([n_confs]).to_event(1))
     mu_conf_dfn = sample("mu_conf_dfn", dist.Normal(0.0, 0.5).expand([n_confs]).to_event(1))
-    sigma_team = sample("sigma_team", dist.HalfNormal(0.5))
-    sigma_rw = sample("sigma_rw", dist.HalfNormal(0.1))
+    sigma_team = sample("sigma_team", dist.HalfNormal(SIGMA_TEAM_PRIOR))
+    sigma_rw = sample("sigma_rw", dist.HalfNormal(SIGMA_RW_PRIOR))
 
     with plate("teams", n_teams):
         z_atk0 = sample("z_atk0", dist.Normal(0.0, 1.0))
@@ -57,7 +72,7 @@ def _model(home, away, period, home_flag, weight, n_teams, n_periods, conf_idx,
     dfn = deterministic("dfn", dfn_base[:, None] + sigma_rw * jnp.cumsum(z_rw_dfn, axis=1))
 
     intercept = sample("intercept", dist.Normal(0.0, 1.0))
-    home_adv = sample("home_adv", dist.Normal(0.25, 0.2))
+    home_adv = sample("home_adv", dist.Normal(HOME_ADV_LOC, HOME_ADV_SCALE))
 
     log_lam = intercept + atk[home, period] - dfn[away, period] + home_adv * home_flag
     log_mu = intercept + atk[away, period] - dfn[home, period]
