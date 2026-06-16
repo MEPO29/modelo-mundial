@@ -24,12 +24,26 @@ backtest before it ships.
 
 | Layer | Module | What it does |
 |---|---|---|
-| **A — Bayesian backbone** | `models/bayes.py` | `DynamicHierarchicalPoisson`: bivariate Poisson with Dixon-Coles low-score correction. Per-team attack/defense strengths evolve as Gaussian random walks over 6-month periods and are partially pooled by confederation (NumPyro SVI). The **only** component that emits a full scoreline distribution (`score_matrix()`), so expected goals and the headline predicted score come from here. |
+| **A — Bayesian backbone** | `models/bayes.py` | `DynamicHierarchicalPoisson`: bivariate Poisson with Dixon-Coles low-score correction. Per-team attack/defense strengths evolve as Gaussian random walks over 6-month periods and are partially pooled by confederation (NumPyro SVI). Prior scales (`SIGMA_RW_PRIOR`, `FRIENDLY_WEIGHT`, home-advantage terms) are module-level constants tuned by a 5-tournament walk-forward sweep. The **only** component that emits a full scoreline distribution (`score_matrix()`), so expected goals and the headline predicted score come from here. |
 | **B — Contextual GBM** | `models/gbm.py` | `GbmModel`: a LightGBM 1X2 classifier over contextual features (rest, altitude, etc.) plus Layer A's posterior means. Captures interactions the parametric model can't. |
 | **C — Market** | `models/market.py` | Shin-de-vigged closing odds from The Odds API. Degrades gracefully to absent when the key or feed is unavailable. |
-| **D — Ensemble** | `models/ensemble.py` | Log-opinion pool (`pool_predict` / `pool_predict_partial`). Weights start from backtest-fitted values and are updated **in-tournament by Hedge (multiplicative weights)** via `hedge_update()`. |
+| **D — Ensemble** | `models/ensemble.py` | Log-opinion pool (`pool_predict` / `pool_predict_partial`). Weights start from a **market-led prior** (`market 0.55`, `bayes 0.35`, `dc`/`gbm` 0.05 each) — see below — and are updated **in-tournament by Hedge (multiplicative weights)** via `hedge_update()`. |
 | — *gate* | `models/baseline.py` | `DixonColes`: the bar every layer must clear on backtest RPS. |
 | — *simulator* | `models/simulate.py` | `TournamentSimulator`: 100k Monte Carlo bracket runs that **sample team strengths from the Bayesian posterior** (propagating uncertainty rather than simulating from point estimates). Handles the 48-team group stage, best-third-place ranking, knockouts, and shootouts. |
+
+### Where the starting weights come from
+
+The ensemble's initial weights are **fit out-of-sample**, not hand-picked. `make
+backtest` runs a **leave-one-tournament-out (LOTO)** evaluation over the WC
+2014/2018/2022 closing-odds subset: fit the pool on two tournaments, score the
+held-out one, average the fitted weights across folds. That puts the
+`bayes:market` split near `0.31:0.69` and improves held-out RPS over the
+market-free pool — the honest test the old `0.35` market prior never had.
+
+The live prior **shrinks off that `0.69` point estimate to `market 0.55`**:
+there are only three folds, and the live feed (The Odds API median) is noisier
+than the backtested closing line. `dc` and `gbm` keep small live slots (`0.05`
+each) and must earn weight through the in-tournament Hedge updates.
 
 ---
 
@@ -63,7 +77,8 @@ Run via the Makefile (`PY := .venv/bin/python`):
 ```bash
 make data       # pull latest international results + WC 2026 fixtures
 make backtest   # walk-forward eval of all layers + ensemble on 5 past tournaments
-                # (also validates the market layer on WC 14/18/22 closing odds)
+                # (also validates the market layer out-of-sample via leave-one-
+                #  tournament-out on WC 14/18/22 closing odds)
 make predict    # fit on everything played, predict upcoming WC matches
 make simulate   # 100k Monte Carlo runs of the full 48-team 2026 bracket
 make update     # full online cycle (see below)
@@ -176,8 +191,11 @@ src/mundial/
   eval/          metrics.py (rps/log_loss/brier/ece), backtest.py (walk-forward)
   online/        update_cycle.py (the post-match learning loop)
 scripts/         predict_next.py (make predict), cloud_digest.py (morning digest)
+notebooks/       EDA + improvement studies (01_eda_diagnostics, 02_eda_diagnostics_v2,
+                 03_improvement_experiments, 04_backbone_sweep) on the ds-agent template
 data/reference/  bracket_2026.json, groups_2026.json, venues_2026.csv, city_altitudes.csv
-artifacts/       online_state.json, pool_weights.json, predictions_log.parquet
+artifacts/       online_state.json, pool_weights.json, predictions_log.parquet;
+                 plots/ + reports/ (committed backtest sweeps and the model-improvement card)
 reports/         per-cycle markdown reports + simulation CSVs
 docs/            ARCHITECTURE.md (full blueprint and roadmap)
 tests/           pytest suite
