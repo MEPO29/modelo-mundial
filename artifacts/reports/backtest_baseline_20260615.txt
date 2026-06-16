@@ -1,0 +1,50 @@
+tournament  model       n     RPS  logloss    ECE
+WC 2014     dc         64  0.2032   0.9606  0.121
+WC 2014     bayes      64  0.1951   0.9332  0.094
+WC 2014     gbm        64  0.2010   0.9830  0.076
+WC 2014     ENSEMBLE   64  0.1982   0.9442  0.099
+WC 2018     dc         64  0.1985   0.9514  0.125
+WC 2018     bayes      64  0.2008   0.9582  0.065
+WC 2018     gbm        64  0.2046   0.9870  0.103
+WC 2018     ENSEMBLE   64  0.2010   0.9588  0.067
+WC 2022     dc         64  0.2125   1.0361  0.062
+WC 2022     bayes      64  0.2081   1.0202  0.085
+WC 2022     gbm        64  0.2203   1.0854  0.096
+WC 2022     ENSEMBLE   64  0.2090   1.0294  0.092
+Euro 2024   dc         51  0.1867   0.9885  0.087
+Euro 2024   bayes      51  0.1824   0.9728  0.093
+Euro 2024   gbm        51  0.1912   0.9971  0.126
+Euro 2024   ENSEMBLE   51  0.1825   0.9732  0.076
+Copa 2024   dc         32  0.1643   0.8945  0.226
+Copa 2024   bayes      32  0.1762   0.9268  0.073
+Copa 2024   gbm        32  0.1820   0.9564  0.147
+Copa 2024   ENSEMBLE   32  0.1762   0.9266  0.096
+
+overall     model       n     RPS  logloss    ECE
+            dc        275  0.1967   0.9735  0.035
+            bayes     275  0.1949   0.9659  0.047
+            gbm       275  0.2023   1.0073  0.056
+            ENSEMBLE  275  0.1959   0.9708  0.039
+
+pool weights {'dc': np.float64(0.0), 'bayes': np.float64(1.015), 'gbm': np.float64(0.0)} saved to /Users/mepo/Documents/Personal/modelo_mundial/artifacts/pool_weights.json
+
+market layer — odds matched 192/192 WC matches
+tournament  model       n     RPS  logloss    ECE
+WC 2014     dc         64  0.2032   0.9606  0.121
+WC 2014     bayes      64  0.1951   0.9332  0.094
+WC 2014     gbm        64  0.2010   0.9830  0.076
+WC 2014     market     64  0.1951   0.9389  0.102
+WC 2018     dc         64  0.1985   0.9514  0.125
+WC 2018     bayes      64  0.2008   0.9582  0.065
+WC 2018     gbm        64  0.2046   0.9870  0.103
+WC 2018     market     64  0.1999   0.9538  0.068
+WC 2022     dc         64  0.2125   1.0361  0.062
+WC 2022     bayes      64  0.2081   1.0202  0.085
+WC 2022     gbm        64  0.2203   1.0854  0.096
+WC 2022     market     64  0.2081   1.0048  0.083
+
+market-inclusive pool on the odds subset (n=192):
+  LOTO RPS  3-comp (dc,bayes,gbm) 0.2025   4-comp (+market) 0.2013  (better)
+  in-sample weights  {'dc': np.float64(0.0), 'bayes': np.float64(0.38), 'gbm': np.float64(0.0), 'market': np.float64(0.62)}
+  LOTO mean weights  {'dc': np.float64(0.0), 'bayes': np.float64(0.315), 'gbm': np.float64(0.0), 'market': np.float64(0.685)}
+  -> out-of-sample market share 0.68 (in-sample 0.62; live prior 0.35)
