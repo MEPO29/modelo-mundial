@@ -26,7 +26,9 @@ def main(days_ahead: int = 4, model_name: str = "bayes") -> None:
         (pl.col("date") >= today) & (pl.col("date") <= today + dt.timedelta(days=days_ahead))
     )
 
-    print(f"model={model_name} | fit through {today} | rho={model.rho:.3f}\n")
+    rho = getattr(model, "rho", None)  # only the Dixon-Coles baseline has rho
+    tag = f" | rho={rho:.3f}" if rho is not None else ""
+    print(f"model={model_name} | fit through {today}{tag}\n")
     print(f"{'date':<11} {'home':<22} {'away':<22} {'P(H)':>6} {'P(D)':>6} {'P(A)':>6}")
     for date, home, away, neu in fixtures.select(
         "date", "home_team", "away_team", "neutral"

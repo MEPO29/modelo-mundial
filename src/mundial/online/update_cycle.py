@@ -26,11 +26,11 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 
+from mundial.eval.metrics import correct_score_hit_rate, score_log_loss, score_rps
 from mundial.ingest.results import download_results, load_fixtures, load_results
 from mundial.models import ensemble as ens
 from mundial.models.baseline import DixonColes
 from mundial.models.bayes import DynamicHierarchicalPoisson
-from mundial.models.gbm import GbmModel
 from mundial.models.market import fetch_odds
 from mundial.models.simulate import TournamentSimulator
 
@@ -40,14 +40,21 @@ REPORTS = PROJECT_ROOT / "reports"
 STATE_PATH = ARTIFACTS / "online_state.json"
 LOG_PATH = ARTIFACTS / "predictions_log.parquet"
 
-COMPONENTS = ["dc", "bayes", "gbm", "market"]
+COMPONENTS = ["dc", "bayes", "market"]
 # Leave-one-tournament-out on WC 14/18/22 closing odds (eval/backtest market
 # analysis) puts the bayes:market split near 0.31:0.69 and improves held-out
 # RPS. The prior reflects that market-led evidence but shrinks off the 0.69
 # point estimate — only 3 folds, and the live feed (The Odds API median) is
-# noisier than the backtested closing line. dc/gbm keep live slots and must
+# noisier than the backtested closing line. dc keeps a live slot and must
 # earn weight through the Hedge updates.
-INITIAL_WEIGHTS = {"dc": 0.05, "bayes": 0.35, "gbm": 0.05, "market": 0.55}
+#
+# GBM was RETIRED from the live pool at V2: it was worst on every live metric
+# (RPS 0.247) and carried ~0 backtest stacking weight, yet the Hedge weight
+# floor kept it skimming mass each match. Its 0.05 prior is reallocated to
+# bayes (which now carries the bivariate-Poisson scoreline upgrade). GBM
+# remains a backtest reference component (eval/backtest.py) so the retirement
+# stays auditable and reversible.
+INITIAL_WEIGHTS = {"dc": 0.05, "bayes": 0.40, "market": 0.55}
 HORIZON_DAYS = 5
 CUSUM_THRESHOLD = 3.0
 N_SIMS = 100_000
@@ -64,9 +71,39 @@ def load_env() -> None:
                 os.environ.setdefault(k.strip(), v.strip())
 
 
+def _validate_weights(weights: dict) -> dict:
+    """Coerce a persisted weight vector onto the current COMPONENTS.
+
+    Guards the failure mode that left the live loop inert: a stale
+    online_state.json shadowing the validated INITIAL_WEIGHTS (e.g. an old
+    4-component vector with a swapped market prior, or a now-retired
+    component). Unknown keys are dropped, missing keys seeded from
+    INITIAL_WEIGHTS, and the result renormalized to sum 1 — so the file's
+    weights can never silently diverge from the current component set again.
+    """
+    clean = {c: float(weights.get(c, INITIAL_WEIGHTS[c])) for c in COMPONENTS}
+    extra = sorted(set(weights) - set(COMPONENTS))
+    missing = [c for c in COMPONENTS if c not in weights]
+    total = sum(clean.values())
+    if extra or missing or abs(total - 1.0) > 1e-6:
+        notes = []
+        if extra:
+            notes.append(f"dropped retired component(s) {extra}")
+        if missing:
+            notes.append(f"seeded missing {missing} from INITIAL_WEIGHTS")
+        if abs(total - 1.0) > 1e-6:
+            notes.append(f"renormalized (sum was {total:.3f})")
+        print(f"load_state: {'; '.join(notes)}")
+    if total <= 0:
+        return dict(INITIAL_WEIGHTS)
+    return {c: w / total for c, w in clean.items()}
+
+
 def load_state() -> dict:
     if STATE_PATH.exists():
-        return json.loads(STATE_PATH.read_text(encoding="utf-8"))
+        state = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+        state["weights"] = _validate_weights(state.get("weights", {}))
+        return state
     return {
         "weights": dict(INITIAL_WEIGHTS),
         "scored": [],
@@ -86,6 +123,28 @@ def match_key(date, home, away) -> str:
 
 def outcome_of(hs: int, as_: int) -> int:
     return 0 if hs > as_ else 1 if hs == as_ else 2
+
+
+def _score_grid(flat, hs: int, as_: int) -> dict | None:
+    """Scoreline metrics for one logged grid against the actual result.
+
+    Returns None for legacy rows that never logged a grid — honest scoring:
+    we never fabricate a scoreline distribution we didn't commit pre-kickoff.
+    The grid is logged row-major (G*G,); G is recovered from its length.
+    """
+    if flat is None:
+        return None
+    arr = np.asarray(flat, dtype=float)
+    if arr.size == 0:
+        return None
+    side = int(round(arr.size**0.5))
+    grid = arr.reshape(side, side)
+    hg, ag = np.array([hs]), np.array([as_])
+    return {
+        "score_log_loss": float(score_log_loss(grid, hg, ag)),
+        "score_rps": float(score_rps(grid, hg, ag)),
+        "hit": bool(correct_score_hit_rate(grid, hg, ag) == 1.0),
+    }
 
 
 def score_new_results(state: dict, results: pl.DataFrame) -> list[dict]:
@@ -121,16 +180,20 @@ def score_new_results(state: dict, results: pl.DataFrame) -> list[dict]:
         weights = ens.hedge_update(weights, losses)
 
         state["scored"].append(key)
-        state["score_history"].append(
-            {
-                "key": key,
-                "outcome": y,
-                "score": f"{hs}-{as_}",
-                "pool_loss": float(pool_loss),
-                "losses": {c: float(l) for c, l in zip(COMPONENTS, losses)},
-                "weights_after": {c: float(w) for c, w in zip(COMPONENTS, weights)},
-            }
-        )
+        entry = {
+            "key": key,
+            "outcome": y,
+            "score": f"{hs}-{as_}",
+            "pool_loss": float(pool_loss),
+            "losses": {c: float(l) for c, l in zip(COMPONENTS, losses)},
+            "weights_after": {c: float(w) for c, w in zip(COMPONENTS, weights)},
+        }
+        # score the logged scoreline grid (diagnostic track, separate from the
+        # 1X2 Hedge pool above); skipped for legacy rows with no grid
+        scoreline = _score_grid(r.get("bayes_grid"), hs, as_)
+        if scoreline is not None:
+            entry["scoreline"] = scoreline
+        state["score_history"].append(entry)
         scored_rows.append({"key": key, "y": y, "hs": hs, "as": as_, "pool_loss": pool_loss})
 
     state["weights"] = {c: float(w) for c, w in zip(COMPONENTS, weights)}
@@ -209,7 +272,6 @@ def predict_upcoming(
     models = {
         "dc": DixonColes().fit(train, as_of=as_of),
         "bayes": bayes,
-        "gbm": GbmModel().fit(train, as_of=as_of, fixtures=fixtures, backbone=bayes),
     }
     try:
         odds = fetch_odds()
@@ -232,7 +294,6 @@ def predict_upcoming(
         blocks: list[np.ndarray | None] = [
             models["dc"].predict_1x2(h, a, neutral=neu)[None, :],
             models["bayes"].predict_1x2(h, a, neutral=neu)[None, :],
-            models["gbm"].predict_1x2(h, a, neutral=neu)[None, :],
             market[(h, a)][None, :] if (h, a) in market else None,
         ]
         pool = ens.pool_predict_partial(weights, blocks)[0]
@@ -248,7 +309,11 @@ def predict_upcoming(
 
         row = {"date": str(r["date"]), "home_team": h, "away_team": a, "neutral": neu,
                "score_pred": f"{mh}-{ma}", "score_prob": float(grid[mh, ma]),
-               "xg_h": xg_h, "xg_a": xg_a}
+               "xg_h": xg_h, "xg_a": xg_a,
+               # full scoreline distribution, row-major (G*G,), so the next
+               # cycle can score the grid against the actual result. Logged
+               # immutably alongside the 1X2 probs; legacy rows lack it.
+               "bayes_grid": grid.reshape(-1).tolist()}
         for c, b in zip(COMPONENTS, blocks):
             for j, suf in enumerate(["h", "d", "a"]):
                 row[f"{c}_{suf}"] = float(b[0, j]) if b is not None else None
@@ -289,7 +354,17 @@ def scoreboard(state: dict) -> dict:
     comp_means = {
         c: float(np.mean([h["losses"][c] for h in hist])) for c in COMPONENTS
     }
-    return {"n_scored": n, "pool_logloss": float(pool), **{f"{c}_logloss": v for c, v in comp_means.items()}}
+    out = {"n_scored": n, "pool_logloss": float(pool),
+           **{f"{c}_logloss": v for c, v in comp_means.items()}}
+    sl = [h["scoreline"] for h in hist if "scoreline" in h]
+    if sl:
+        out["scoreline"] = {
+            "n": len(sl),
+            "score_log_loss": float(np.mean([s["score_log_loss"] for s in sl])),
+            "score_rps": float(np.mean([s["score_rps"] for s in sl])),
+            "hit_rate": float(np.mean([s["hit"] for s in sl])),
+        }
+    return out
 
 
 def write_report(today, scored, state, preds, sim_table, cusum, warning=None) -> Path:
@@ -324,6 +399,17 @@ def write_report(today, scored, state, preds, sim_table, cusum, warning=None) ->
             + ("  ⚠️ ALARM — model drifting worse than market" if cusum > CUSUM_THRESHOLD else ""),
             "",
         ]
+        if "scoreline" in sb:
+            sl = sb["scoreline"]
+            lines += [
+                "## Scoreline accuracy (bayes grid, scored matches only)",
+                "",
+                f"- matches with logged grid: {sl['n']}",
+                f"- scoreline log-loss: {sl['score_log_loss']:.4f}",
+                f"- margin RPS: {sl['score_rps']:.4f}",
+                f"- exact-score hit rate: {sl['hit_rate']:.1%}",
+                "",
+            ]
     if preds.height:
         lines += ["## Upcoming matches (pool forecast)", "",
                   "| date | match | P(H) | P(D) | P(A) | likely score | xG | market P(H/D/A) |",

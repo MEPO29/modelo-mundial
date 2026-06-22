@@ -16,7 +16,17 @@ import datetime as dt
 import numpy as np
 import polars as pl
 
-from mundial.eval.metrics import brier, ece, log_loss, rps
+from mundial.eval.metrics import (
+    brier,
+    correct_score_hit_rate,
+    draw_calibration,
+    ece,
+    log_loss,
+    paired_bootstrap,
+    rps,
+    score_log_loss,
+    score_rps,
+)
 from mundial.ingest.footy_odds import oriented_market
 from mundial.ingest.results import load_results
 from mundial.models import ensemble as ens
@@ -67,7 +77,9 @@ def collect_predictions(results: pl.DataFrame) -> pl.DataFrame:
             "bayes": bayes,
             "gbm": GbmModel().fit(results, as_of=start, fixtures=test, backbone=bayes),
         }
-        rows = test.select("date", "home_team", "away_team", "neutral").to_dicts()
+        rows = test.select(
+            "date", "home_team", "away_team", "neutral", "home_score", "away_score"
+        ).to_dicts()
         y = outcome_labels(test)
         market = oriented_market(test, MARKET_YEARS[name]) if name in MARKET_YEARS else None
         for i, r in enumerate(rows):
@@ -76,6 +88,15 @@ def collect_predictions(results: pl.DataFrame) -> pl.DataFrame:
             for comp, model in models.items():
                 p = model.predict_1x2(r["home_team"], r["away_team"], neutral=r["neutral"])
                 r[f"{comp}_h"], r[f"{comp}_d"], r[f"{comp}_a"] = map(float, p)
+            # bayes scoreline grids: the live bivariate-Poisson and the
+            # shared-component-off ablation (independent Poisson, same rates),
+            # so scoreline_analysis can isolate the structural change's value.
+            grid_bp = bayes.score_matrix(r["home_team"], r["away_team"], neutral=r["neutral"])
+            grid_ind = bayes.score_matrix(
+                r["home_team"], r["away_team"], neutral=r["neutral"], shared=False
+            )
+            r["bayes_grid"] = grid_bp.reshape(-1).tolist()
+            r["bayes_grid_indep"] = grid_ind.reshape(-1).tolist()
             if market is not None and not np.isnan(market[i]).any():
                 r["market_h"], r["market_d"], r["market_a"] = map(float, market[i])
             else:
@@ -150,6 +171,55 @@ def market_analysis(preds: pl.DataFrame) -> None:
           f"(in-sample {w4_in[-1]:.2f}; live prior 0.35)")
 
 
+def _grids(preds: pl.DataFrame, col: str) -> np.ndarray:
+    """Stack a flattened-grid column back to (n, G, G)."""
+    flat = np.asarray(preds[col].to_list(), dtype=float)
+    g = int(round(flat.shape[1] ** 0.5))
+    return flat.reshape(-1, g, g)
+
+
+def _scoreline_metrics(grids: np.ndarray, hg: np.ndarray, ag: np.ndarray) -> dict:
+    return {
+        "sll": score_log_loss(grids, hg, ag),
+        "srps": score_rps(grids, hg, ag),
+        "hit": correct_score_hit_rate(grids, hg, ag),
+        "draw_ece": draw_calibration(grids, hg, ag),
+    }
+
+
+def scoreline_analysis(preds: pl.DataFrame) -> None:
+    """Compare the bivariate-Poisson scoreline grid against the independent-
+    Poisson ablation (shared component off, identical fitted rates).
+
+    The structural change ships only if the BP grid improves scoreline
+    log-loss AND draw calibration with a paired-bootstrap CI on the per-match
+    log-loss delta that excludes 0 — the guard against shipping noise.
+    """
+    if "bayes_grid" not in preds.columns:
+        return
+    hg = preds["home_score"].to_numpy().astype(int)
+    ag = preds["away_score"].to_numpy().astype(int)
+    bp = _grids(preds, "bayes_grid")
+    ind = _grids(preds, "bayes_grid_indep")
+
+    print(f"\n{'scoreline':<22} {'n':>3}  {'SLL':>7}  {'mRPS':>6}  {'hit%':>5}  {'drawECE':>7}")
+    for name, grids in (("independent-Poisson", ind), ("bivariate-Poisson", bp)):
+        m = _scoreline_metrics(grids, hg, ag)
+        print(f"{name:<22} {len(hg):>3}  {m['sll']:>7.4f}  {m['srps']:>6.4f}  "
+              f"{m['hit'] * 100:>5.1f}  {m['draw_ece']:>7.4f}")
+
+    g = bp.shape[1] - 1
+    h, a = np.clip(hg, 0, g), np.clip(ag, 0, g)
+    idx = np.arange(len(h))
+    sll_bp = -np.log(np.clip(bp[idx, h, a], 1e-12, 1.0))
+    sll_ind = -np.log(np.clip(ind[idx, h, a], 1e-12, 1.0))
+    mean_d, lo, hi = paired_bootstrap(sll_ind - sll_bp)  # >0 => BP better
+    ships = lo > 0
+    print(f"\nscoreline log-loss improvement (independent - bivariate): "
+          f"{mean_d:+.4f}  90% CI [{lo:+.4f}, {hi:+.4f}]")
+    print(f"  gate: {'PASS — BP improves with CI support' if ships else 'HOLD — within noise'}")
+
+
 def main() -> None:
     results = load_results().filter(pl.col("date") >= dt.date(1990, 1, 1))
     preds = collect_predictions(results)
@@ -189,6 +259,7 @@ def main() -> None:
     print(f"\npool weights {dict(zip(COMPONENTS, weights.round(3)))} saved to {path}")
 
     market_analysis(preds)
+    scoreline_analysis(preds)
 
 
 if __name__ == "__main__":
