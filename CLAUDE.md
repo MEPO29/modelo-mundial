@@ -37,8 +37,8 @@ Four-layer prediction stack with an online learning loop running through the 202
 
 | Layer | File | Role |
 |---|---|---|
-| A — Bayesian backbone | `bayes.py` | `DynamicHierarchicalPoisson`: bivariate Poisson with Dixon-Coles low-score correction, per-team attack/defense strengths evolving as Gaussian random walks over 6-month periods, partially pooled by confederation (via NumPyro SVI). The only component that produces a full scoreline distribution (`score_matrix()`). |
-| B — GBM layer | `gbm.py` | `GbmModel`: LightGBM 1X2 classifier consuming contextual features (rest, altitude, etc.) plus Layer A posterior means. |
+| A — Bayesian backbone | `bayes.py` | `DynamicHierarchicalPoisson`: **shared-latent bivariate Poisson** (Karlis–Ntzoufras: home=X1+X3, away=X2+X3) — the shared X3 produces real goal correlation / draw mass in the likelihood (closed-form pmf via `numpyro.factor`), replacing the old independent double-Poisson + post-hoc Dixon-Coles tau. Per-team attack/defense strengths evolve as Gaussian random walks over 6-month periods, partially pooled by confederation (NumPyro SVI). The only component that produces a full scoreline distribution (`score_matrix()`); a dormant `prior_offset` hook accepts an external strength prior (Elo/ranking/futures). |
+| B — GBM layer | `gbm.py` | `GbmModel`: LightGBM 1X2 classifier consuming contextual features (rest, altitude, etc.) plus Layer A posterior means. **Retired from the live pool** (dead weight: backtest stacking weight ~0, worst live RPS) — kept only as a backtest reference component in `eval/backtest.py`. |
 | C — Market layer | `market.py` | Shin-de-vigged closing odds from The Odds API. Degrades gracefully when unavailable. |
 | D — Ensemble | `ensemble.py` | Log-opinion pool: `pool_predict()` / `pool_predict_partial()`. Weights start from LOTO-fitted values and are updated in-tournament by **Hedge (multiplicative weights)** via `hedge_update()`. |
 | — | `baseline.py` | `DixonColes`: the gate — every layer must beat this on backtest RPS before it ships. |
@@ -46,7 +46,7 @@ Four-layer prediction stack with an online learning loop running through the 202
 
 ### Online learning loop (`src/mundial/online/update_cycle.py`)
 
-The cycle scores previously-logged predictions against new results (never retroactively fills in unlogged forecasts), applies the Hedge weight update, refits models, logs predictions for upcoming matches (immutably — first logged forecast per match is frozen), re-simulates, writes a markdown cycle report, and pushes `artifacts/` + `reports/` to remote.
+The cycle scores previously-logged predictions against new results (never retroactively fills in unlogged forecasts), applies the Hedge weight update, refits models, logs predictions for upcoming matches (immutably — first logged forecast per match is frozen), re-simulates, writes a markdown cycle report, and pushes `artifacts/` + `reports/` to remote. The live pool is `dc / bayes / market` (GBM retired). Each logged prediction also carries the full bayes scoreline grid (`bayes_grid`), scored next cycle on a separate scoreline track (`score_log_loss` / margin `score_rps` / draw calibration in `eval/metrics.py`); legacy rows without a grid are still 1X2-scored. `load_state()` validates/renormalizes persisted weights against the current component set so a stale state file can't silently shadow the prior.
 
 State: `artifacts/online_state.json` (weights, score history, CUSUM). Prediction record: `artifacts/predictions_log.parquet` (append-only). CUSUM threshold 3.0 triggers a market-outperformance alarm in cycle reports.
 
@@ -75,3 +75,12 @@ State: `artifacts/online_state.json` (weights, score history, CUSUM). Prediction
 
 `data/reference/bracket_2026.json` — 48-team bracket topology (group definitions, knockout pairings, third-place rules).  
 `data/reference/groups_2026.json` — official group assignments.
+
+## Tool budget
+
+This project is set up for the `ds-agent-framework` (see `memory/`, `notebooks/00_template.ipynb`). MCP availability as of bootstrap (2026-06-15):
+
+- **`mcp__jupyter__*`** — available. Notebook-first agents (EDA, modeling, interpretation) run cells here; `notebooks/` is the working surface.
+- **`mcp__postgres__*`** — available, but this project has no database; the data pipeline reads `martj42/international_results` CSVs into `data/raw/`. Treat postgres tools as unused unless a DB is introduced.
+
+Defaults from `.claude/settings.local.json`: read-only Bash/jupyter/postgres calls are pre-approved; writes, `pip install`, and SQL/cell execution are gated to "ask". Local Python lives at `.venv/bin/python` (`.venv/Scripts/python.exe` on Windows).

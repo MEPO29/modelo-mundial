@@ -1,9 +1,8 @@
 {
   "weights": {
     "dc": 0.05,
-    "bayes": 0.55,
-    "gbm": 0.05,
-    "market": 0.35
+    "bayes": 0.4,
+    "market": 0.55
   },
   "scored": [],
   "score_history": [],

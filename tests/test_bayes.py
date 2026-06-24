@@ -5,7 +5,7 @@ import polars as pl
 import pytest
 
 from mundial.ingest.confederations import team_confederations
-from mundial.models.bayes import DynamicHierarchicalPoisson
+from mundial.models.bayes import DynamicHierarchicalPoisson, _bp_grid_np
 
 
 @pytest.fixture(scope="module")
@@ -67,6 +67,26 @@ def test_posterior_not_degenerate(fitted):
     s = fitted._samples
     assert np.abs(s["atk"]).max() < 10, "attack strengths exploded (bad init?)"
     assert s["intercept"].std() > 0
+    # the shared bivariate-Poisson component must stay a modest correlation
+    # term, not absorb the overall goal level (intercept identifiability)
+    lam3 = np.exp(s["cov_intercept"])
+    assert 0.01 < lam3.mean() < 1.0, "shared component absorbed the goal level"
+
+
+def test_bivariate_poisson_lifts_draw_mass_at_equal_means():
+    # mean-matched comparison: independent (l1,l2) vs BP (l1-l3,l2-l3,l3) share
+    # the same marginal goal expectations, so any extra diagonal mass is the
+    # genuine correlation the shared component adds (the draw-discrimination win
+    # an independent double-Poisson structurally cannot produce).
+    l1, l2, l3 = 1.4, 1.2, 0.3
+    indep = _bp_grid_np(np.log([l1]), np.log([l2]), np.array([-50.0]))[0]
+    bp = _bp_grid_np(np.log([l1 - l3]), np.log([l2 - l3]), np.log([l3]))[0]
+    indep /= indep.sum()
+    bp /= bp.sum()
+    g = np.arange(indep.shape[0])
+    assert abs((indep.sum(axis=1) * g).sum() - l1) < 0.05  # marginal mean preserved
+    assert abs((bp.sum(axis=1) * g).sum() - l1) < 0.05
+    assert np.trace(bp) > np.trace(indep) + 0.01  # excess draw mass
 
 
 def test_confederation_mapping(synthetic_matches):

@@ -7,10 +7,15 @@ principled treatment of sparse intercontinental overlap: a team with few
 cross-confederation matches is shrunk toward a prior that *is* informed by
 cross-confederation play. Friendlies enter the likelihood at half weight.
 
+Goals follow a SHARED-LATENT bivariate Poisson (Karlis & Ntzoufras): home =
+X1 + X3, away = X2 + X3 with X3 a shared Poisson component. X3 induces the
+positive goal correlation — and, crucially, the excess draw mass — that an
+independent double-Poisson misses and the old Dixon-Coles post-hoc tau only
+patched onto four low-score cells. The likelihood is the closed-form BP pmf,
+marginalized over X3, so SVI stays as cheap as the independent model.
+
 Fit via SVI (AutoNormal, Adam) — minutes on CPU, which is what makes the
-post-match sequential refit cheap during the tournament. The Dixon-Coles
-low-score correlation rho is profiled post-hoc on posterior-mean rates and
-applied to the predictive scoreline grid, mirroring the baseline.
+post-match sequential refit cheap during the tournament.
 """
 
 from __future__ import annotations
@@ -22,17 +27,18 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import polars as pl
-from numpyro import deterministic, handlers, plate, sample
+from jax.scipy.special import gammaln as jgammaln
+from jax.scipy.special import logsumexp as jlogsumexp
+from numpyro import deterministic, factor, handlers, plate, sample
 from numpyro import distributions as dist
 from numpyro.infer import SVI, Predictive, Trace_ELBO
 from numpyro.infer.autoguide import AutoNormal
 from numpyro.infer.initialization import init_to_median
 from numpyro.optim import ClippedAdam
-from scipy.optimize import minimize_scalar
-from scipy.special import factorial
+from scipy.special import gammaln, logsumexp
 
 from mundial.ingest.confederations import CONFEDERATIONS, team_confederations
-from mundial.models.baseline import MAX_GOALS, _tau
+from mundial.models.baseline import MAX_GOALS
 
 PERIOD_DAYS = 182
 # Friendlies carry real strength signal; the previous 0.5 under-counted them.
@@ -51,10 +57,68 @@ SIGMA_RW_PRIOR = 0.2     # HalfNormal scale on the per-period random-walk step
 SIGMA_TEAM_PRIOR = 0.5   # HalfNormal scale on team base-strength dispersion
 HOME_ADV_LOC = 0.25      # Normal mean of the home-advantage log-rate term
 HOME_ADV_SCALE = 0.2     # Normal sd of the home-advantage term
+# Shared bivariate-Poisson component X3 ~ Poisson(exp(cov_intercept)). The
+# prior centers lambda3 ~ exp(-2.0) ≈ 0.14 (a realistic shared goal rate) with
+# a tight scale so it captures correlation/draw mass without absorbing the
+# overall goal level (identifiability vs the intercept).
+COV_LOC = -2.0
+COV_SCALE = 0.5
+# Coupling of a standardized external strength prior (FIFA/Elo rank, etc.)
+PRIOR_OFFSET_SCALE = 0.3
+
+
+def _bp_log_pmf(x, y, log_lam, log_mu, log_lam3, k):
+    """Bivariate-Poisson log-pmf, marginalized over the shared latent X3.
+
+    home = X1 + X3, away = X2 + X3 with rates exp(log_lam), exp(log_mu),
+    exp(log_lam3). x, y, log_lam, log_mu are (n,); log_lam3 is scalar; k is a
+    static (K,) arange covering 0..max(min(x,y)). The inner sum runs only to
+    min(x,y) per observation — terms beyond that are masked to a finite large
+    negative (not -inf) so the SVI gradient stays well-defined. Reduces exactly
+    to independent Poisson as log_lam3 -> -inf.
+    """
+    lam, mu, lam3 = jnp.exp(log_lam), jnp.exp(log_mu), jnp.exp(log_lam3)
+    c = log_lam3 - log_lam - log_mu              # (n,)
+    kk = k[None, :]                              # (1, K)
+    minxy = jnp.minimum(x, y)[:, None]           # (n, 1)
+    valid = kk <= minxy
+    xk = jnp.maximum(x[:, None] - kk + 1.0, 1.0)  # clamp so gammaln stays finite
+    yk = jnp.maximum(y[:, None] - kk + 1.0, 1.0)
+    g = -jgammaln(kk + 1.0) - jgammaln(xk) - jgammaln(yk) + kk * c[:, None]
+    g = jnp.where(valid, g, -1e30)
+    log_s = jlogsumexp(g, axis=1)                # (n,)
+    return -(lam + mu + lam3) + x * log_lam + y * log_mu + log_s
+
+
+def _bp_grid_np(log_lam, log_mu, log_lam3):
+    """Bivariate-Poisson scoreline grid (numpy), one per posterior sample.
+
+    log_lam/log_mu/log_lam3 are (S,). Returns P(h, a) of shape (S, G, G) with
+    G = MAX_GOALS + 1 — the same closed-form pmf as ``_bp_log_pmf``, evaluated
+    over the full goal grid for the predictive distribution.
+    """
+    g = MAX_GOALS + 1
+    h = np.arange(g)
+    k = np.arange(g)  # shared component up to min(h, a) <= MAX_GOALS
+    lam, mu, lam3 = np.exp(log_lam), np.exp(log_mu), np.exp(log_lam3)
+    c = (log_lam3 - log_lam - log_mu)[:, None, None, None]  # (S,1,1,1)
+    H = h[None, :, None, None]
+    A = h[None, None, :, None]
+    K = k[None, None, None, :]
+    valid = K <= np.minimum(H, A)
+    xk = np.maximum(H - K + 1, 1)
+    yk = np.maximum(A - K + 1, 1)
+    gk = -gammaln(K + 1) - gammaln(xk) - gammaln(yk) + K * c
+    gk = np.where(valid, gk, -np.inf)
+    log_s = logsumexp(gk, axis=3)  # (S, G, G)
+    base = -(lam + mu + lam3)[:, None, None]
+    logp = (base + h[None, :, None] * log_lam[:, None, None]
+            + h[None, None, :] * log_mu[:, None, None] + log_s)
+    return np.exp(logp)
 
 
 def _model(home, away, period, home_flag, weight, n_teams, n_periods, conf_idx,
-           n_confs, hg=None, ag=None):
+           n_confs, k, prior_offset=None, hg=None, ag=None):
     mu_conf_atk = sample("mu_conf_atk", dist.Normal(0.0, 0.5).expand([n_confs]).to_event(1))
     mu_conf_dfn = sample("mu_conf_dfn", dist.Normal(0.0, 0.5).expand([n_confs]).to_event(1))
     sigma_team = sample("sigma_team", dist.HalfNormal(SIGMA_TEAM_PRIOR))
@@ -66,6 +130,15 @@ def _model(home, away, period, home_flag, weight, n_teams, n_periods, conf_idx,
     atk_base = mu_conf_atk[conf_idx] + sigma_team * z_atk0
     dfn_base = mu_conf_dfn[conf_idx] + sigma_team * z_dfn0
 
+    # Optional external strength prior (Workstream C): a standardized per-team
+    # offset (ranking/Elo/value) shifts attack and defense base strength. Off
+    # by default (prior_offset=None) so the backbone is unchanged without it.
+    if prior_offset is not None:
+        beta_atk = sample("beta_atk", dist.Normal(0.0, PRIOR_OFFSET_SCALE))
+        beta_dfn = sample("beta_dfn", dist.Normal(0.0, PRIOR_OFFSET_SCALE))
+        atk_base = atk_base + beta_atk * prior_offset
+        dfn_base = dfn_base + beta_dfn * prior_offset
+
     z_rw_atk = sample("z_rw_atk", dist.Normal(0.0, 1.0).expand([n_teams, n_periods]).to_event(2))
     z_rw_dfn = sample("z_rw_dfn", dist.Normal(0.0, 1.0).expand([n_teams, n_periods]).to_event(2))
     atk = deterministic("atk", atk_base[:, None] + sigma_rw * jnp.cumsum(z_rw_atk, axis=1))
@@ -73,14 +146,15 @@ def _model(home, away, period, home_flag, weight, n_teams, n_periods, conf_idx,
 
     intercept = sample("intercept", dist.Normal(0.0, 1.0))
     home_adv = sample("home_adv", dist.Normal(HOME_ADV_LOC, HOME_ADV_SCALE))
+    cov_intercept = sample("cov_intercept", dist.Normal(COV_LOC, COV_SCALE))
 
     log_lam = intercept + atk[home, period] - dfn[away, period] + home_adv * home_flag
     log_mu = intercept + atk[away, period] - dfn[home, period]
 
     if hg is not None:
+        log_pmf = _bp_log_pmf(hg, ag, log_lam, log_mu, cov_intercept, k)
         with handlers.scale(scale=weight):
-            sample("hg", dist.Poisson(jnp.exp(log_lam)), obs=hg)
-            sample("ag", dist.Poisson(jnp.exp(log_mu)), obs=ag)
+            factor("obs", log_pmf)
 
 
 @dataclass
@@ -90,7 +164,6 @@ class DynamicHierarchicalPoisson:
     learning_rate: float = 0.01
     num_samples: int = 400
     seed: int = 0
-    rho: float = -0.05
     teams: list[str] = field(default_factory=list)
     _index: dict[str, int] = field(default_factory=dict)
     _conf_of: dict[str, str] = field(default_factory=dict)
@@ -125,8 +198,14 @@ class DynamicHierarchicalPoisson:
             conf_idx=jnp.array(conf_idx),
             n_confs=n_confs,
         )
-        hg = jnp.array(np.minimum(df["home_score"].to_numpy(), MAX_GOALS))
-        ag = jnp.array(np.minimum(df["away_score"].to_numpy(), MAX_GOALS))
+        hg_np = np.minimum(df["home_score"].to_numpy(), MAX_GOALS)
+        ag_np = np.minimum(df["away_score"].to_numpy(), MAX_GOALS)
+        hg = jnp.array(hg_np.astype(float))
+        ag = jnp.array(ag_np.astype(float))
+        # k arange for the bivariate-Poisson inner sum: 0..max over data of
+        # min(home, away) goals (the shared component can be at most that).
+        n_k = int(np.minimum(hg_np, ag_np).max()) + 1
+        args["k"] = jnp.arange(n_k, dtype=float)
 
         # init_to_uniform (the default) would start sigma_rw near exp(2) and the
         # period-cumsum amplifies that into +-50 log-rates SVI never recovers from
@@ -139,29 +218,12 @@ class DynamicHierarchicalPoisson:
 
         predictive = Predictive(
             _model, guide=guide, params=result.params, num_samples=self.num_samples,
-            return_sites=["atk", "dfn", "intercept", "home_adv", "mu_conf_atk", "mu_conf_dfn"],
+            return_sites=["atk", "dfn", "intercept", "home_adv", "cov_intercept",
+                          "mu_conf_atk", "mu_conf_dfn"],
         )
         raw = predictive(jax.random.PRNGKey(self.seed + 1), **args)
-        self._samples = {k: np.asarray(v) for k, v in raw.items()}
-
-        self._profile_rho(df, hg=np.asarray(hg), ag=np.asarray(ag), args=args)
+        self._samples = {kk: np.asarray(v) for kk, v in raw.items()}
         return self
-
-    def _profile_rho(self, df, hg, ag, args):
-        s = self._samples
-        atk = s["atk"].mean(0)
-        dfn = s["dfn"].mean(0)
-        icpt = s["intercept"].mean()
-        ha = s["home_adv"].mean()
-        hi, ai, per = np.asarray(args["home"]), np.asarray(args["away"]), np.asarray(args["period"])
-        hf = np.asarray(args["home_flag"])
-        lam = np.exp(icpt + atk[hi, per] - dfn[ai, per] + ha * hf)
-        mu = np.exp(icpt + atk[ai, per] - dfn[hi, per])
-
-        def nll(rho):
-            return -np.sum(np.log(np.clip(_tau(hg, ag, lam, mu, rho), 1e-10, None)))
-
-        self.rho = minimize_scalar(nll, bounds=(-0.5, 0.5), method="bounded").x
 
     def _team_strengths(self, team: str) -> tuple[np.ndarray, np.ndarray]:
         """Posterior samples of (attack, defense) at the latest period."""
@@ -196,25 +258,25 @@ class DynamicHierarchicalPoisson:
         c = CONFEDERATIONS.index(self._conf_of.get(team, "OTHER"))
         return float(s["mu_conf_atk"][:, c].mean()), float(s["mu_conf_dfn"][:, c].mean())
 
-    def score_matrix(self, home: str, away: str, neutral: bool = True) -> np.ndarray:
-        """Posterior-predictive P(h, a) grid, averaged over strength samples."""
+    def score_matrix(
+        self, home: str, away: str, neutral: bool = True, shared: bool = True
+    ) -> np.ndarray:
+        """Posterior-predictive P(h, a) grid, averaged over strength samples.
+
+        Uses the bivariate-Poisson pmf with the shared component, so the
+        diagonal (draw) mass and low-score correlation are produced by the
+        model rather than patched on afterward. ``shared=False`` zeroes the
+        shared component (independent Poisson on the same fitted rates) — the
+        ablation the backtest uses to isolate the structural change's value.
+        """
         s = self._samples
         atk_h, dfn_h = self._team_strengths(home)
         atk_a, dfn_a = self._team_strengths(away)
         ha = 0.0 if neutral else s["home_adv"]
-        lam = np.exp(s["intercept"] + atk_h - dfn_a + ha)  # (S,)
-        mu = np.exp(s["intercept"] + atk_a - dfn_h)
-
-        g = np.arange(MAX_GOALS + 1)
-        fact = factorial(g, exact=False)
-        ph = np.exp(-lam[:, None]) * lam[:, None] ** g / fact  # (S, G)
-        pa = np.exp(-mu[:, None]) * mu[:, None] ** g / fact
-        grids = np.einsum("sh,sa->sha", ph, pa)
-        for h in (0, 1):
-            for a in (0, 1):
-                grids[:, h, a] *= _tau(
-                    np.full_like(lam, h), np.full_like(lam, a), lam, mu, self.rho
-                )
+        log_lam = s["intercept"] + atk_h - dfn_a + ha  # (S,)
+        log_mu = s["intercept"] + atk_a - dfn_h
+        log_lam3 = s["cov_intercept"] if shared else np.full_like(s["intercept"], -50.0)
+        grids = _bp_grid_np(log_lam, log_mu, log_lam3)  # (S, G, G)
         m = grids.mean(0)
         return m / m.sum()
 
