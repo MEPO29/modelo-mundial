@@ -1,8 +1,8 @@
 {
   "weights": {
-    "dc": 0.06166051540664127,
-    "bayes": 0.5625987835228246,
-    "market": 0.3757407010705342
+    "dc": 0.05822186631475262,
+    "bayes": 0.5748764792314085,
+    "market": 0.3669016544538388
   },
   "scored": [
     "2026-06-11|Mexico|South Africa",
@@ -52,7 +52,13 @@
     "2026-06-23|Portugal|Uzbekistan",
     "2026-06-23|Colombia|DR Congo",
     "2026-06-23|England|Ghana",
-    "2026-06-23|Panama|Croatia"
+    "2026-06-23|Panama|Croatia",
+    "2026-06-24|Mexico|Czech Republic",
+    "2026-06-24|South Africa|South Korea",
+    "2026-06-24|Canada|Switzerland",
+    "2026-06-24|Bosnia and Herzegovina|Qatar",
+    "2026-06-24|Scotland|Brazil",
+    "2026-06-24|Morocco|Haiti"
   ],
   "score_history": [
     {
@@ -918,7 +924,103 @@
         "gbm": 0.04529057637141902,
         "market": 0.3587231881528483
       }
+    },
+    {
+      "key": "2026-06-24|Mexico|Czech Republic",
+      "outcome": 0,
+      "score": "3-0",
+      "pool_loss": 0.6687306008707089,
+      "losses": {
+        "dc": 0.6682848266865801,
+        "bayes": 0.695087374109556,
+        "market": 0.6687306008707089
+      },
+      "weights_after": {
+        "dc": 0.06184861218867443,
+        "bayes": 0.5612980811170136,
+        "market": 0.376853306694312
+      }
+    },
+    {
+      "key": "2026-06-24|South Africa|South Korea",
+      "outcome": 0,
+      "score": "1-0",
+      "pool_loss": 1.47185834993427,
+      "losses": {
+        "dc": 1.5315777146786698,
+        "bayes": 1.3149103082285576,
+        "market": 1.811570555739134
+      },
+      "weights_after": {
+        "dc": 0.06158168950072178,
+        "bayes": 0.5836260791477306,
+        "market": 0.3547922313515477
+      }
+    },
+    {
+      "key": "2026-06-24|Canada|Switzerland",
+      "outcome": 2,
+      "score": "1-2",
+      "pool_loss": 0.7396125110490076,
+      "losses": {
+        "dc": 0.8692233224381797,
+        "bayes": 0.718756816866818,
+        "market": 0.7396125110490076
+      },
+      "weights_after": {
+        "dc": 0.05995409205219269,
+        "bayes": 0.5855598290465793,
+        "market": 0.354486078901228
+      }
+    },
+    {
+      "key": "2026-06-24|Bosnia and Herzegovina|Qatar",
+      "outcome": 0,
+      "score": "3-1",
+      "pool_loss": 0.5268150607829739,
+      "losses": {
+        "dc": 0.7219459945796419,
+        "bayes": 0.6194072227410092,
+        "market": 0.3849094929410343
+      },
+      "weights_after": {
+        "dc": 0.05782323650362429,
+        "bayes": 0.5764494723601448,
+        "market": 0.365727291136231
+      }
+    },
+    {
+      "key": "2026-06-24|Scotland|Brazil",
+      "outcome": 2,
+      "score": "0-3",
+      "pool_loss": 0.33805424041498966,
+      "losses": {
+        "dc": 0.38541308756745324,
+        "bayes": 0.309409339135785,
+        "market": 0.3816137026146847
+      },
+      "weights_after": {
+        "dc": 0.057301369197312664,
+        "bayes": 0.5799966039063775,
+        "market": 0.36270202689630987
+      }
+    },
+    {
+      "key": "2026-06-24|Morocco|Haiti",
+      "outcome": 0,
+      "score": "4-2",
+      "pool_loss": 0.3239674610473065,
+      "losses": {
+        "dc": 0.251406771964549,
+        "bayes": 0.37542439482600926,
+        "market": 0.2735281188398683
+      },
+      "weights_after": {
+        "dc": 0.05822186631475262,
+        "bayes": 0.5748764792314085,
+        "market": 0.3669016544538388
+      }
     }
   ],
-  "cusum": 0.0
+  "cusum": 0.0004393422074382286
 }
