@@ -280,7 +280,49 @@ class DynamicHierarchicalPoisson:
         m = grids.mean(0)
         return m / m.sum()
 
+    @staticmethod
+    def _grid_1x2(m: np.ndarray) -> np.ndarray:
+        """[P(home win), P(draw), P(away win)] from a scoreline grid."""
+        return np.array([np.tril(m, -1).sum(), np.trace(m), np.triu(m, 1).sum()])
+
     def predict_1x2(self, home: str, away: str, neutral: bool = True) -> np.ndarray:
         """[P(home win), P(draw), P(away win)] — outcome order 0/1/2 as in eval.metrics."""
-        m = self.score_matrix(home, away, neutral)
-        return np.array([np.tril(m, -1).sum(), np.trace(m), np.triu(m, 1).sum()])
+        return self._grid_1x2(self.score_matrix(home, away, neutral))
+
+    def knockout_breakdown(
+        self, home: str, away: str, neutral: bool = True
+    ) -> dict[str, np.ndarray | float]:
+        """Sequential knockout resolution for a single tie.
+
+        A knockout match is decided in up to three stages: 90 minutes, then
+        (if level) 30 minutes of extra time, then (if still level) a shootout.
+        Returns each stage's outcome distribution PLUS the unconditional
+        advancement probabilities:
+
+        - ``ft``   : [P(H), P(draw), P(A)] over 90' (a draw sends the tie to ET)
+        - ``et``   : [P(H), P(draw), P(A)] scored in the 30' of extra time,
+                     CONDITIONAL on a level 90' (a draw sends it to penalties)
+        - ``pens`` : [P(H), P(A)] shootout — a model-agnostic coin flip
+        - ``advance`` : [P(home advances), P(away advances)], chaining the three
+        - ``p_reach_et`` / ``p_reach_pens`` : P(the tie reaches that stage)
+
+        ET uses ``ET_RATE_FACTOR`` of the 90' rates (the same approximation as
+        the bracket simulator). Only the bivariate-Poisson backbone yields a
+        scoreline distribution, so this is a bayes-layer product.
+        """
+        ft = self.predict_1x2(home, away, neutral)
+        et = self._grid_1x2(
+            self.score_matrix(home, away, neutral, rate_factor=ET_RATE_FACTOR)
+        )
+        pens = np.array([PENALTY_HOME_WIN, 1.0 - PENALTY_HOME_WIN])
+        # win in 90'; else level then win the 30'; else level again then shootout
+        adv_h = ft[0] + ft[1] * (et[0] + et[1] * pens[0])
+        adv_a = ft[2] + ft[1] * (et[2] + et[1] * pens[1])
+        return {
+            "ft": ft,
+            "et": et,
+            "pens": pens,
+            "advance": np.array([adv_h, adv_a]),
+            "p_reach_et": float(ft[1]),
+            "p_reach_pens": float(ft[1] * et[1]),
+        }
