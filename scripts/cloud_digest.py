@@ -75,11 +75,22 @@ def build_digest() -> str:
                 f"  (mkt {r['market_h']:.0%}/{r['market_d']:.0%}/{r['market_a']:.0%})"
                 if r["market_h"] is not None else ""
             )
-            lines.append(
+            label = " (90')" if r.get("is_knockout") else ""
+            block = (
                 f"{r['home_team']} v {r['away_team']}\n"
-                f"  {r['pool_h']:.0%} / {r['pool_d']:.0%} / {r['pool_a']:.0%}{mk}\n"
+                f"  {r['pool_h']:.0%} / {r['pool_d']:.0%} / {r['pool_a']:.0%}{label}{mk}\n"
                 f"  ⚽ {r['score_pred']} ({r['score_prob']:.0%}) · xG {r['xg_h']:.1f}–{r['xg_a']:.1f}"
             )
+            if r.get("is_knockout"):
+                # 90' draw is not final: chain extra time then a shootout
+                block += (
+                    f"\n  🎟 advance: {r['home_team']} {r['adv_h']:.0%} · "
+                    f"{r['away_team']} {r['adv_a']:.0%}"
+                    f"\n  ⏱ to ET {r['p_reach_et']:.0%} → ET "
+                    f"{r['et_h']:.0%}/{r['et_d']:.0%}/{r['et_a']:.0%} · "
+                    f"pens {r['p_reach_pens']:.0%} (50/50)"
+                )
+            lines.append(block)
 
     # yesterday's results
     played = results.filter(

@@ -59,6 +59,12 @@ HORIZON_DAYS = 5
 CUSUM_THRESHOLD = 3.0
 N_SIMS = 100_000
 
+# WC 2026 group stage runs Jun 11–27; the Round of 32 opens Jun 28. From this
+# date a "draw" is no longer a final result — the tie continues into extra time
+# and (if still level) penalties, so knockout fixtures carry the full
+# FT → ET → penalties resolution in the forecast and the digest.
+KNOCKOUT_START = dt.date(2026, 6, 28)
+
 
 def load_env() -> None:
     env = PROJECT_ROOT / ".env"
@@ -319,9 +325,41 @@ def predict_upcoming(
                 row[f"{c}_{suf}"] = float(b[0, j]) if b is not None else None
         for j, suf in enumerate(["h", "d", "a"]):
             row[f"pool_{suf}"] = float(pool[j])
+
+        # Knockout resolution. The headline 1X2 (pool, above) is the 90-minute
+        # result; from the Round of 32 a 90' draw is not final. The FT split
+        # uses the pool (so it carries the market layer); the conditional ET
+        # distribution and the coin-flip shootout come from the bayes backbone.
+        ko_cols = ["et_h", "et_d", "et_a", "pens_h", "pens_a",
+                   "adv_h", "adv_a", "p_reach_et", "p_reach_pens"]
+        if dt.date.fromisoformat(row["date"]) >= KNOCKOUT_START:
+            kb = models["bayes"].knockout_breakdown(h, a, neutral=neu)
+            et = kb["et"]
+            pens_h = float(kb["pens"][0])
+            # advancement chains the pool's FT split with the bayes ET split
+            adv_h = pool[0] + pool[1] * (et[0] + et[1] * pens_h)
+            adv_a = pool[2] + pool[1] * (et[2] + et[1] * (1.0 - pens_h))
+            row.update({
+                "is_knockout": True,
+                "et_h": float(et[0]), "et_d": float(et[1]), "et_a": float(et[2]),
+                "pens_h": pens_h, "pens_a": 1.0 - pens_h,
+                "adv_h": float(adv_h), "adv_a": float(adv_a),
+                "p_reach_et": float(pool[1]),
+                "p_reach_pens": float(pool[1] * et[1]),
+            })
+        else:
+            row["is_knockout"] = False
+            for col in ko_cols:
+                row[col] = None
         row["logged_at"] = dt.datetime.now().isoformat(timespec="seconds")
         rows.append(row)
-    return pl.DataFrame(rows), models["bayes"]
+    # Pin the knockout columns to Float64 so a group-stage-only frame (all
+    # nulls) doesn't infer a Null dtype that clashes with a later knockout
+    # frame on append.
+    ko_schema = {c: pl.Float64 for c in
+                 ("et_h", "et_d", "et_a", "pens_h", "pens_a",
+                  "adv_h", "adv_a", "p_reach_et", "p_reach_pens")}
+    return pl.DataFrame(rows, schema_overrides=ko_schema), models["bayes"]
 
 
 def append_log(preds: pl.DataFrame) -> None:
@@ -340,7 +378,10 @@ def append_log(preds: pl.DataFrame) -> None:
             how="anti",
         )
         if new.height:
-            pl.concat([old, new], how="diagonal").write_parquet(LOG_PATH)
+            # diagonal_relaxed supertypes column dtypes that differ across
+            # frames (e.g. a group-only day's null knockout columns vs a
+            # knockout day's Float64) instead of erroring.
+            pl.concat([old, new], how="diagonal_relaxed").write_parquet(LOG_PATH)
     else:
         preds.write_parquet(LOG_PATH)
 
@@ -426,6 +467,26 @@ def write_report(today, scored, state, preds, sim_table, cusum, warning=None) ->
                 f"{r['xg_h']:.1f}–{r['xg_a']:.1f} | {mk} |"
             )
         lines.append("")
+        ko = [r for r in preds.iter_rows(named=True) if r.get("is_knockout")]
+        if ko:
+            lines += [
+                "## Knockout resolution",
+                "",
+                "1X2 above is the 90' result; below chains extra time (30' at "
+                "1/3 rate) and a coin-flip shootout into who advances.",
+                "",
+                "| match | advance (H / A) | to ET | ET (H/D/A) | to pens |",
+                "|---|---|---|---|---|",
+            ]
+            for r in ko:
+                lines.append(
+                    f"| {r['home_team']} v {r['away_team']} | "
+                    f"{r['adv_h']:.1%} / {r['adv_a']:.1%} | "
+                    f"{r['p_reach_et']:.1%} | "
+                    f"{r['et_h']:.0%}/{r['et_d']:.0%}/{r['et_a']:.0%} | "
+                    f"{r['p_reach_pens']:.1%} |"
+                )
+            lines.append("")
     if sim_table is not None:
         lines += ["## Title race (top 10)", "",
                   "| team | R16 | QF | SF | Final | Champion |", "|---|---|---|---|---|---|"]

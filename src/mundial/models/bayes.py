@@ -65,6 +65,12 @@ COV_LOC = -2.0
 COV_SCALE = 0.5
 # Coupling of a standardized external strength prior (FIFA/Elo rank, etc.)
 PRIOR_OFFSET_SCALE = 0.3
+# Extra time = 30 minutes played at one third of the 90' scoring rates, then a
+# coin-flip shootout if still level. Mirrors the knockout resolution the
+# tournament simulator already uses (simulate.ET_RATE_FACTOR), so a single
+# match's knockout breakdown and the bracket sim stay on the same assumptions.
+ET_RATE_FACTOR = 1.0 / 3.0
+PENALTY_HOME_WIN = 0.5
 
 
 def _bp_log_pmf(x, y, log_lam, log_mu, log_lam3, k):
@@ -259,7 +265,8 @@ class DynamicHierarchicalPoisson:
         return float(s["mu_conf_atk"][:, c].mean()), float(s["mu_conf_dfn"][:, c].mean())
 
     def score_matrix(
-        self, home: str, away: str, neutral: bool = True, shared: bool = True
+        self, home: str, away: str, neutral: bool = True, shared: bool = True,
+        rate_factor: float = 1.0,
     ) -> np.ndarray:
         """Posterior-predictive P(h, a) grid, averaged over strength samples.
 
@@ -268,19 +275,64 @@ class DynamicHierarchicalPoisson:
         model rather than patched on afterward. ``shared=False`` zeroes the
         shared component (independent Poisson on the same fitted rates) — the
         ablation the backtest uses to isolate the structural change's value.
+        ``rate_factor`` scales every goal rate (lam, mu, lam3) by a constant —
+        ``ET_RATE_FACTOR`` gives the extra-time (30') scoreline distribution.
         """
         s = self._samples
         atk_h, dfn_h = self._team_strengths(home)
         atk_a, dfn_a = self._team_strengths(away)
         ha = 0.0 if neutral else s["home_adv"]
-        log_lam = s["intercept"] + atk_h - dfn_a + ha  # (S,)
-        log_mu = s["intercept"] + atk_a - dfn_h
-        log_lam3 = s["cov_intercept"] if shared else np.full_like(s["intercept"], -50.0)
+        log_rf = float(np.log(rate_factor))
+        log_lam = s["intercept"] + atk_h - dfn_a + ha + log_rf  # (S,)
+        log_mu = s["intercept"] + atk_a - dfn_h + log_rf
+        log_lam3 = (s["cov_intercept"] if shared else np.full_like(s["intercept"], -50.0)) + log_rf
         grids = _bp_grid_np(log_lam, log_mu, log_lam3)  # (S, G, G)
         m = grids.mean(0)
         return m / m.sum()
 
+    @staticmethod
+    def _grid_1x2(m: np.ndarray) -> np.ndarray:
+        """[P(home win), P(draw), P(away win)] from a scoreline grid."""
+        return np.array([np.tril(m, -1).sum(), np.trace(m), np.triu(m, 1).sum()])
+
     def predict_1x2(self, home: str, away: str, neutral: bool = True) -> np.ndarray:
         """[P(home win), P(draw), P(away win)] — outcome order 0/1/2 as in eval.metrics."""
-        m = self.score_matrix(home, away, neutral)
-        return np.array([np.tril(m, -1).sum(), np.trace(m), np.triu(m, 1).sum()])
+        return self._grid_1x2(self.score_matrix(home, away, neutral))
+
+    def knockout_breakdown(
+        self, home: str, away: str, neutral: bool = True
+    ) -> dict[str, np.ndarray | float]:
+        """Sequential knockout resolution for a single tie.
+
+        A knockout match is decided in up to three stages: 90 minutes, then
+        (if level) 30 minutes of extra time, then (if still level) a shootout.
+        Returns each stage's outcome distribution PLUS the unconditional
+        advancement probabilities:
+
+        - ``ft``   : [P(H), P(draw), P(A)] over 90' (a draw sends the tie to ET)
+        - ``et``   : [P(H), P(draw), P(A)] scored in the 30' of extra time,
+                     CONDITIONAL on a level 90' (a draw sends it to penalties)
+        - ``pens`` : [P(H), P(A)] shootout — a model-agnostic coin flip
+        - ``advance`` : [P(home advances), P(away advances)], chaining the three
+        - ``p_reach_et`` / ``p_reach_pens`` : P(the tie reaches that stage)
+
+        ET uses ``ET_RATE_FACTOR`` of the 90' rates (the same approximation as
+        the bracket simulator). Only the bivariate-Poisson backbone yields a
+        scoreline distribution, so this is a bayes-layer product.
+        """
+        ft = self.predict_1x2(home, away, neutral)
+        et = self._grid_1x2(
+            self.score_matrix(home, away, neutral, rate_factor=ET_RATE_FACTOR)
+        )
+        pens = np.array([PENALTY_HOME_WIN, 1.0 - PENALTY_HOME_WIN])
+        # win in 90'; else level then win the 30'; else level again then shootout
+        adv_h = ft[0] + ft[1] * (et[0] + et[1] * pens[0])
+        adv_a = ft[2] + ft[1] * (et[2] + et[1] * pens[1])
+        return {
+            "ft": ft,
+            "et": et,
+            "pens": pens,
+            "advance": np.array([adv_h, adv_a]),
+            "p_reach_et": float(ft[1]),
+            "p_reach_pens": float(ft[1] * et[1]),
+        }
