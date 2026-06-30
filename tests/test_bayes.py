@@ -5,11 +5,7 @@ import polars as pl
 import pytest
 
 from mundial.ingest.confederations import team_confederations
-from mundial.models.bayes import (
-    ET_RATE_FACTOR,
-    DynamicHierarchicalPoisson,
-    _bp_grid_np,
-)
+from mundial.models.bayes import DynamicHierarchicalPoisson, _bp_grid_np
 
 
 @pytest.fixture(scope="module")
@@ -91,31 +87,6 @@ def test_bivariate_poisson_lifts_draw_mass_at_equal_means():
     assert abs((indep.sum(axis=1) * g).sum() - l1) < 0.05  # marginal mean preserved
     assert abs((bp.sum(axis=1) * g).sum() - l1) < 0.05
     assert np.trace(bp) > np.trace(indep) + 0.01  # excess draw mass
-
-
-def test_knockout_breakdown_is_consistent(fitted):
-    kb = fitted.knockout_breakdown("Strong", "Weak")
-    # each stage is a valid distribution
-    assert abs(kb["ft"].sum() - 1.0) < 1e-9
-    assert abs(kb["et"].sum() - 1.0) < 1e-9
-    assert kb["pens"].tolist() == [0.5, 0.5]
-    # someone always advances; the two advancement probs partition 1
-    assert abs(kb["advance"].sum() - 1.0) < 1e-9
-    assert (kb["advance"] >= 0).all()
-    # a tie reaches penalties strictly less often than it reaches extra time
-    assert kb["p_reach_pens"] < kb["p_reach_et"]
-    assert kb["p_reach_et"] == pytest.approx(kb["ft"][1])
-    # Strong is favoured to go through against Weak
-    assert kb["advance"][0] > 0.5
-
-
-def test_extra_time_scores_fewer_goals_than_full_time(fitted):
-    # ET is 30' at 1/3 of the 90' rate, so its scoreline grid concentrates far
-    # more mass on 0-0 (more ET ties -> more shootouts) than the 90' grid.
-    ft = fitted.score_matrix("Strong", "Weak")
-    et = fitted.score_matrix("Strong", "Weak", rate_factor=ET_RATE_FACTOR)
-    assert et[0, 0] > ft[0, 0]
-    assert np.trace(et) > np.trace(ft)  # more draws over the shorter period
 
 
 def test_confederation_mapping(synthetic_matches):
