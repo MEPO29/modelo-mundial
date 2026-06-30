@@ -65,6 +65,12 @@ COV_LOC = -2.0
 COV_SCALE = 0.5
 # Coupling of a standardized external strength prior (FIFA/Elo rank, etc.)
 PRIOR_OFFSET_SCALE = 0.3
+# Extra time = 30 minutes played at one third of the 90' scoring rates, then a
+# coin-flip shootout if still level. Mirrors the knockout resolution the
+# tournament simulator already uses (simulate.ET_RATE_FACTOR), so a single
+# match's knockout breakdown and the bracket sim stay on the same assumptions.
+ET_RATE_FACTOR = 1.0 / 3.0
+PENALTY_HOME_WIN = 0.5
 
 
 def _bp_log_pmf(x, y, log_lam, log_mu, log_lam3, k):
@@ -259,7 +265,8 @@ class DynamicHierarchicalPoisson:
         return float(s["mu_conf_atk"][:, c].mean()), float(s["mu_conf_dfn"][:, c].mean())
 
     def score_matrix(
-        self, home: str, away: str, neutral: bool = True, shared: bool = True
+        self, home: str, away: str, neutral: bool = True, shared: bool = True,
+        rate_factor: float = 1.0,
     ) -> np.ndarray:
         """Posterior-predictive P(h, a) grid, averaged over strength samples.
 
@@ -268,14 +275,17 @@ class DynamicHierarchicalPoisson:
         model rather than patched on afterward. ``shared=False`` zeroes the
         shared component (independent Poisson on the same fitted rates) — the
         ablation the backtest uses to isolate the structural change's value.
+        ``rate_factor`` scales every goal rate (lam, mu, lam3) by a constant —
+        ``ET_RATE_FACTOR`` gives the extra-time (30') scoreline distribution.
         """
         s = self._samples
         atk_h, dfn_h = self._team_strengths(home)
         atk_a, dfn_a = self._team_strengths(away)
         ha = 0.0 if neutral else s["home_adv"]
-        log_lam = s["intercept"] + atk_h - dfn_a + ha  # (S,)
-        log_mu = s["intercept"] + atk_a - dfn_h
-        log_lam3 = s["cov_intercept"] if shared else np.full_like(s["intercept"], -50.0)
+        log_rf = float(np.log(rate_factor))
+        log_lam = s["intercept"] + atk_h - dfn_a + ha + log_rf  # (S,)
+        log_mu = s["intercept"] + atk_a - dfn_h + log_rf
+        log_lam3 = (s["cov_intercept"] if shared else np.full_like(s["intercept"], -50.0)) + log_rf
         grids = _bp_grid_np(log_lam, log_mu, log_lam3)  # (S, G, G)
         m = grids.mean(0)
         return m / m.sum()
