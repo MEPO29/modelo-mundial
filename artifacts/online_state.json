@@ -1,8 +1,8 @@
 {
   "weights": {
-    "dc": 0.06142877194808317,
-    "bayes": 0.5337192226317176,
-    "market": 0.4048520054201992
+    "dc": 0.059780245853992636,
+    "bayes": 0.5057885911589669,
+    "market": 0.43443116298704043
   },
   "scored": [
     "2026-06-11|Mexico|South Africa",
@@ -80,7 +80,10 @@
     "2026-06-28|South Africa|Canada",
     "2026-06-29|Brazil|Japan",
     "2026-06-29|Germany|Paraguay",
-    "2026-06-29|Netherlands|Morocco"
+    "2026-06-29|Netherlands|Morocco",
+    "2026-06-30|Ivory Coast|Norway",
+    "2026-06-30|France|Sweden",
+    "2026-06-30|Mexico|Ecuador"
   ],
   "score_history": [
     {
@@ -1414,7 +1417,70 @@
         "score_rps": 0.0164050742376186,
         "hit": false
       }
+    },
+    {
+      "key": "2026-06-30|Ivory Coast|Norway",
+      "outcome": 2,
+      "score": "1-2",
+      "pool_loss": 0.8878305257349515,
+      "losses": {
+        "dc": 0.8171174421039074,
+        "bayes": 0.9964881438295592,
+        "market": 0.7520965831316248
+      },
+      "weights_after": {
+        "dc": 0.06226992699111188,
+        "bayes": 0.5219626494512337,
+        "market": 0.4157674235576544
+      },
+      "scoreline": {
+        "score_log_loss": 2.584395476525438,
+        "score_rps": 0.027671426256954335,
+        "hit": false
+      }
+    },
+    {
+      "key": "2026-06-30|France|Sweden",
+      "outcome": 0,
+      "score": "3-0",
+      "pool_loss": 0.42787817897276453,
+      "losses": {
+        "dc": 0.42718317191390925,
+        "bayes": 0.5825086772944765,
+        "market": 0.26339084790064765
+      },
+      "weights_after": {
+        "dc": 0.06240222661819645,
+        "bayes": 0.5070721457447681,
+        "market": 0.4305256276370354
+      },
+      "scoreline": {
+        "score_log_loss": 2.837864958857273,
+        "score_rps": 0.07474141004172107,
+        "hit": false
+      }
+    },
+    {
+      "key": "2026-06-30|Mexico|Ecuador",
+      "outcome": 0,
+      "score": "2-0",
+      "pool_loss": 0.8804037551244415,
+      "losses": {
+        "dc": 1.0951729399903627,
+        "bayes": 0.8932170729327059,
+        "market": 0.8353912387682848
+      },
+      "weights_after": {
+        "dc": 0.059780245853992636,
+        "bayes": 0.5057885911589669,
+        "market": 0.43443116298704043
+      },
+      "scoreline": {
+        "score_log_loss": 2.584167387792226,
+        "score_rps": 0.05665213214954902,
+        "hit": false
+      }
     }
   ],
-  "cusum": 0.0
+  "cusum": 0.1952337900316003
 }
