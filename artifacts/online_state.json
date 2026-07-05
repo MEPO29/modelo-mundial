@@ -1,8 +1,8 @@
 {
   "weights": {
-    "dc": 0.05843242318714987,
-    "bayes": 0.47807724198505275,
-    "market": 0.4634903348277974
+    "dc": 0.055837118268987754,
+    "bayes": 0.4579485289379217,
+    "market": 0.48621435279309044
   },
   "scored": [
     "2026-06-11|Mexico|South Africa",
@@ -92,7 +92,9 @@
     "2026-07-02|Switzerland|Algeria",
     "2026-07-03|Australia|Egypt",
     "2026-07-03|Argentina|Cape Verde",
-    "2026-07-03|Colombia|Ghana"
+    "2026-07-03|Colombia|Ghana",
+    "2026-07-04|Canada|Morocco",
+    "2026-07-04|Paraguay|France"
   ],
   "score_history": [
     {
@@ -1678,7 +1680,49 @@
         "score_rps": 0.014671777784311701,
         "hit": true
       }
+    },
+    {
+      "key": "2026-07-04|Canada|Morocco",
+      "outcome": 2,
+      "score": "0-3",
+      "pool_loss": 0.6675509146225234,
+      "losses": {
+        "dc": 0.7542009676676094,
+        "bayes": 0.7277196239386967,
+        "market": 0.588239945135484
+      },
+      "weights_after": {
+        "dc": 0.05738902326356548,
+        "bayes": 0.47203385403145226,
+        "market": 0.4705771227049822
+      },
+      "scoreline": {
+        "score_log_loss": 3.189115571885106,
+        "score_rps": 0.0900284850122463,
+        "hit": false
+      }
+    },
+    {
+      "key": "2026-07-04|Paraguay|France",
+      "outcome": 2,
+      "score": "0-1",
+      "pool_loss": 0.3597154061200811,
+      "losses": {
+        "dc": 0.504094214519279,
+        "bayes": 0.518492762442454,
+        "market": 0.20357460340135825
+      },
+      "weights_after": {
+        "dc": 0.055837118268987754,
+        "bayes": 0.4579485289379217,
+        "market": 0.48621435279309044
+      },
+      "scoreline": {
+        "score_log_loss": 1.7064818393988244,
+        "score_rps": 0.015140435641552197,
+        "hit": true
+      }
     }
   ],
-  "cusum": 0.05971336591332249
+  "cusum": 0.1951651381190847
 }
