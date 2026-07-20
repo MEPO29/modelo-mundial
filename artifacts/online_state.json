@@ -1,8 +1,8 @@
 {
   "weights": {
-    "dc": 0.062347632048377545,
-    "bayes": 0.4586068635459512,
-    "market": 0.4790455044056713
+    "dc": 0.06163846371078824,
+    "bayes": 0.4510532813098907,
+    "market": 0.4873082549793211
   },
   "scored": [
     "2026-06-11|Mexico|South Africa",
@@ -105,7 +105,8 @@
     "2026-07-11|Argentina|Switzerland",
     "2026-07-14|France|Spain",
     "2026-07-15|England|Argentina",
-    "2026-07-18|France|England"
+    "2026-07-18|France|England",
+    "2026-07-19|Spain|Argentina"
   ],
   "score_history": [
     {
@@ -1964,7 +1965,28 @@
         "score_rps": 0.06966038835624153,
         "hit": false
       }
+    },
+    {
+      "key": "2026-07-19|Spain|Argentina",
+      "outcome": 0,
+      "score": "1-0",
+      "pool_loss": 0.9475478878901811,
+      "losses": {
+        "dc": 1.0156717349211721,
+        "bayes": 1.041513021155547,
+        "market": 0.8729672111514227
+      },
+      "weights_after": {
+        "dc": 0.06163846371078824,
+        "bayes": 0.4510532813098907,
+        "market": 0.4873082549793211
+      },
+      "scoreline": {
+        "score_log_loss": 2.058115221467443,
+        "score_rps": 0.028828608016982477,
+        "hit": false
+      }
     }
   ],
-  "cusum": 0.0
+  "cusum": 0.024580676738758342
 }
